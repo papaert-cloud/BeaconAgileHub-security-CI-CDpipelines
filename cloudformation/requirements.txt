@@ -1,0 +1,3 @@
+troposphere==4.5.3
+cfn-lint==0.83.4
+boto3==1.34.0

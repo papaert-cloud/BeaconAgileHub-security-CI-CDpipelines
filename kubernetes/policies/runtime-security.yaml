@@ -1,0 +1,137 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-signed-images
+  annotations:
+    policies.kyverno.io/title: Require Signed Container Images
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+spec:
+  validationFailureAction: enforce
+  background: false
+  rules:
+  - name: check-image-signature
+    match:
+      any:
+      - resources:
+          kinds: [Pod]
+    verifyImages:
+    - imageReferences:
+      - "ghcr.io/*"
+      attestors:
+      - entries:
+        - keyless:
+            subject: "*@*"
+            issuer: "https://token.actions.githubusercontent.com"
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-sbom-attestation
+  annotations:
+    policies.kyverno.io/title: Require SBOM Attestation
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: medium
+spec:
+  validationFailureAction: audit
+  background: false
+  rules:
+  - name: check-sbom-attestation
+    match:
+      any:
+      - resources:
+          kinds: [Pod]
+    verifyImages:
+    - imageReferences:
+      - "ghcr.io/*"
+      attestations:
+      - predicateType: https://spdx.dev/Document
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: enforce-security-context
+  annotations:
+    policies.kyverno.io/title: Enforce Pod Security Context
+    policies.kyverno.io/category: Pod Security
+    policies.kyverno.io/severity: high
+spec:
+  validationFailureAction: enforce
+  background: true
+  rules:
+  - name: check-security-context
+    match:
+      any:
+      - resources:
+          kinds: [Pod]
+    validate:
+      message: "Security context requirements not met"
+      pattern:
+        spec:
+          securityContext:
+            runAsNonRoot: true
+            fsGroup: ">0"
+          containers:
+          - name: "*"
+            securityContext:
+              allowPrivilegeEscalation: false
+              runAsNonRoot: true
+              runAsUser: ">0"
+              capabilities:
+                drop: [ALL]
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-resource-limits
+  annotations:
+    policies.kyverno.io/title: Require Resource Limits
+    policies.kyverno.io/category: Resource Management
+    policies.kyverno.io/severity: medium
+spec:
+  validationFailureAction: enforce
+  background: true
+  rules:
+  - name: validate-resources
+    match:
+      any:
+      - resources:
+          kinds: [Pod]
+    validate:
+      message: "Resource requests and limits are required"
+      pattern:
+        spec:
+          containers:
+          - name: "*"
+            resources:
+              requests:
+                memory: "?*"
+                cpu: "?*"
+              limits:
+                memory: "?*"
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: default
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: default
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+  egress:
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53

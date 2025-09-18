@@ -1,0 +1,191 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-network-policies
+  annotations:
+    policies.kyverno.io/title: Require Network Policies
+    policies.kyverno.io/category: ICS Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Network segmentation is critical for ICS security. This policy ensures
+      that every namespace has appropriate network policies for micro-segmentation.
+spec:
+  validationFailureAction: enforce
+  background: true
+  rules:
+  - name: check-network-policy-exists
+    match:
+      any:
+      - resources:
+          kinds:
+          - Namespace
+    validate:
+      message: "Network policies are required for ICS compliance"
+      deny:
+        conditions:
+          any:
+          - key: "{{ request.object.metadata.name }}"
+            operator: NotIn
+            value: ["kube-system", "kube-public", "kyverno"]
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-ingress-classes
+  annotations:
+    policies.kyverno.io/title: Restrict Ingress Classes
+    policies.kyverno.io/category: Network Security
+    policies.kyverno.io/severity: medium
+spec:
+  validationFailureAction: enforce
+  background: true
+  rules:
+  - name: check-ingress-class
+    match:
+      any:
+      - resources:
+          kinds:
+          - Ingress
+    validate:
+      message: "Only approved ingress classes are allowed"
+      pattern:
+        spec:
+          ingressClassName: "nginx|alb"
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-pod-security-standards
+  annotations:
+    policies.kyverno.io/title: Require Pod Security Standards
+    policies.kyverno.io/category: Endpoint Security
+    policies.kyverno.io/severity: high
+spec:
+  validationFailureAction: enforce
+  background: true
+  rules:
+  - name: check-security-context
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+    validate:
+      message: "Pod must run as non-root with read-only filesystem"
+      pattern:
+        spec:
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: ">1000"
+          containers:
+          - name: "*"
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop:
+                - ALL
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-image-signature
+  annotations:
+    policies.kyverno.io/title: Require Image Signature
+    policies.kyverno.io/category: Application Security
+    policies.kyverno.io/severity: high
+spec:
+  validationFailureAction: enforce
+  background: false
+  rules:
+  - name: check-image-signature
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+    verifyImages:
+    - imageReferences:
+      - "ghcr.io/*"
+      attestors:
+      - entries:
+        - keys:
+            publicKeys: |-
+              -----BEGIN PUBLIC KEY-----
+              # Replace with actual Cosign public key
+              -----END PUBLIC KEY-----
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-sbom-attestation
+  annotations:
+    policies.kyverno.io/title: Require SBOM Attestation
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+spec:
+  validationFailureAction: enforce
+  background: false
+  rules:
+  - name: check-sbom-attestation
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+    verifyImages:
+    - imageReferences:
+      - "ghcr.io/*"
+      attestations:
+      - predicateType: https://spdx.dev/Document
+        conditions:
+        - all:
+          - key: "{{ element.predicate.name }}"
+            operator: Equals
+            value: "sbom-security-pipeline"
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: default
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: default
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+  egress:
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-app-to-db
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: web-app
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: database
+    ports:
+    - protocol: TCP
+      port: 5432

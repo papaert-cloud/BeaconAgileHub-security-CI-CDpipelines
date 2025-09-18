@@ -1,0 +1,80 @@
+name: 'CD Pipeline - Multi-Platform Deployment'
+
+on:
+  workflow_run:
+    workflows: ["CI Pipeline - Security First"]
+    types: [completed]
+    branches: [main, develop]
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+jobs:
+  determine-deployment:
+    name: 'Determine Deployment Strategy'
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    outputs:
+      environment: ${{ steps.env.outputs.environment }}
+      deploy_to_eks: ${{ steps.strategy.outputs.deploy_to_eks }}
+      deploy_to_ecs: ${{ steps.strategy.outputs.deploy_to_ecs }}
+      container_image: ${{ steps.image.outputs.image }}
+    steps:
+    - name: Determine Environment
+      id: env
+      run: |
+        if [[ "${{ github.event.workflow_run.head_branch }}" == "main" ]]; then
+          echo "environment=production" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.event.workflow_run.head_branch }}" == "develop" ]]; then
+          echo "environment=staging" >> $GITHUB_OUTPUT
+        else
+          echo "environment=dev" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Deployment Strategy
+      id: strategy
+      run: |
+        ENV="${{ steps.env.outputs.environment }}"
+        if [[ "$ENV" == "production" ]]; then
+          echo "deploy_to_eks=true" >> $GITHUB_OUTPUT
+          echo "deploy_to_ecs=true" >> $GITHUB_OUTPUT
+        else
+          echo "deploy_to_eks=true" >> $GITHUB_OUTPUT
+          echo "deploy_to_ecs=false" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Container Image
+      id: image
+      run: |
+        echo "image=ghcr.io/${{ github.repository }}:${{ github.event.workflow_run.head_sha }}" >> $GITHUB_OUTPUT
+
+  deploy-application:
+    name: 'Deploy Application'
+    needs: determine-deployment
+    uses: ./.github/workflows/_reusable/cd-deployment.yml
+    with:
+      application_name: "sbom-security-pipeline"
+      application_version: ${{ github.event.workflow_run.head_sha }}
+      environment: ${{ needs.determine-deployment.outputs.environment }}
+      container_image: ${{ needs.determine-deployment.outputs.container_image }}
+      deploy_to_eks: ${{ needs.determine-deployment.outputs.deploy_to_eks == 'true' }}
+      enable_dast_testing: true
+    secrets:
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+
+  post-deployment:
+    name: 'Post-Deployment Actions'
+    runs-on: ubuntu-latest
+    needs: [determine-deployment, deploy-application]
+    if: always()
+    steps:
+    - name: Deployment Status
+      run: |
+        if [[ "${{ needs.deploy-application.outputs.deployment_successful }}" == "true" ]]; then
+          echo "🎉 Deployment to ${{ needs.determine-deployment.outputs.environment }} successful!"
+        else
+          echo "💥 Deployment to ${{ needs.determine-deployment.outputs.environment }} failed!"
+          exit 1
+        fi

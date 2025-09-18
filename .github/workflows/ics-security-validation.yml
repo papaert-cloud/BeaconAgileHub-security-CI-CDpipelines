@@ -1,0 +1,77 @@
+name: ICS Security Validation - Industrial-Grade Security
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM
+  workflow_dispatch:
+    inputs:
+      security_level:
+        description: 'ICS Security Level'
+        required: false
+        default: 'SL-2'
+        type: choice
+        options:
+        - SL-1
+        - SL-2
+        - SL-3
+
+jobs:
+  network-security-audit:
+    name: Network Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: VPC Security Assessment
+        run: |
+          aws ec2 describe-security-groups --query 'SecurityGroups[?GroupName!=`default`]' --output table
+      - name: Network Segmentation Validation
+        run: |
+          terraform plan -target=module.network_security terraform/modules/network-security/
+
+  endpoint-security-scan:
+    name: Endpoint Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Container Hardening Check
+        run: |
+          docker run --rm -v $(pwd):/workspace aquasec/trivy image --security-checks vuln,config ghcr.io/${{ github.repository }}:latest
+      - name: Runtime Security Validation
+        run: |
+          kubectl get pods --all-namespaces -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.securityContext}{"\n"}{end}'
+
+  application-security-test:
+    name: Application Security Testing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: OWASP ZAP Full Scan
+        run: |
+          docker run -v $(pwd):/zap/wrk/:rw -t owasp/zap2docker-stable zap-full-scan.py -t http://localhost:8080 -J zap-report.json
+      - name: API Security Testing
+        run: |
+          curl -X GET http://localhost:8080/ics/status | jq '.compliance_frameworks'
+
+  database-security-audit:
+    name: Database Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: RDS Security Configuration
+        run: |
+          aws rds describe-db-instances --query 'DBInstances[*].[DBInstanceIdentifier,StorageEncrypted,DeletionProtection]' --output table
+      - name: Database Access Control Review
+        run: |
+          aws iam list-policies --scope Local --query 'Policies[?contains(PolicyName,`database`)]'
+
+  threat-intelligence-update:
+    name: Threat Intelligence Update
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: GuardDuty Findings Review
+        run: |
+          aws guardduty list-findings --detector-id $(aws guardduty list-detectors --query 'DetectorIds[0]' --output text)
+      - name: Security Hub Findings Summary
+        run: |
+          aws securityhub get-findings --filters '{"SeverityLabel":[{"Value":"HIGH","Comparison":"EQUALS"}]}' --query 'Findings[*].[Title,Severity.Label]' --output table

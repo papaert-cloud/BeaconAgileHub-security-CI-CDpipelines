@@ -1,0 +1,116 @@
+name: CI Pipeline - Development Integration
+
+on:
+  push:
+    branches: [ main, develop, feature/* ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  determine-environment:
+    name: Determine Environment
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.env.outputs.environment }}
+    steps:
+      - id: env
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "environment=production" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+            echo "environment=staging" >> $GITHUB_OUTPUT
+          else
+            echo "environment=dev" >> $GITHUB_OUTPUT
+          fi
+
+  security-gates:
+    name: Security Gates
+    needs: determine-environment
+    uses: ./.github/workflows/_reusable/security-gates.yml
+    with:
+      environment: ${{ needs.determine-environment.outputs.environment }}
+      severity_threshold: 'medium'
+      enable_sbom: true
+    secrets:
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    needs: [determine-environment, security-gates]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+          
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./app
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          
+      - name: Sign container image
+        run: |
+          cosign sign --yes ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          
+      - name: Generate SBOM for container
+        run: |
+          syft ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} -o cyclonedx-json=container-sbom.json
+          
+      - name: Container Security Scan
+        run: |
+          grype ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} -o json --file container-vulnerabilities.json
+
+  ics-security-validation:
+    name: ICS Security Validation
+    runs-on: ubuntu-latest
+    needs: [determine-environment, build-and-test]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Network Security Validation
+        run: |
+          # Validate network segmentation policies
+          kubectl apply --dry-run=client -f kubernetes/policies/network-policies.yaml
+          
+      - name: Endpoint Security Check
+        run: |
+          # Validate container hardening
+          docker run --rm -v $(pwd):/workspace aquasec/trivy image --security-checks vuln,config ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          
+      - name: Application Security Gates
+        run: |
+          # OWASP ZAP baseline scan
+          docker run -v $(pwd):/zap/wrk/:rw -t owasp/zap2docker-stable zap-baseline.py -t http://localhost:8080 -J zap-report.json
