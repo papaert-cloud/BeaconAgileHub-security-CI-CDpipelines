@@ -44,21 +44,8 @@ resource "aws_cloudformation_stack_set_instance" "accounts" {
   depends_on = [aws_cloudformation_stack_set.enterprise]
 }
 
-# StackSet Instances for multi-account (service-managed)
-resource "aws_cloudformation_stack_set_instance" "multi_account" {
-  count = var.enable_multi_account ? length(var.target_accounts) : 0
-
-  stack_set_name = aws_cloudformation_stack_set.org_managed[0].name
-  account_id     = var.target_accounts[count.index].account_id
-  region         = var.target_accounts[count.index].region
-
-  parameter_overrides = {
-    Environment = var.target_accounts[count.index].environment
-    VpcCidr     = var.target_accounts[count.index].vpc_cidr
-  }
-
-  depends_on = [aws_cloudformation_stack_set.org_managed]
-}
+# Note: For SERVICE_MANAGED StackSets, instances are managed through AWS Organizations
+# and auto-deployment settings in the StackSet itself
 
 # Organizations integration for service-managed StackSets
 resource "aws_cloudformation_stack_set" "org_managed" {

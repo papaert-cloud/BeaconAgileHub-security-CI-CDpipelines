@@ -15,22 +15,13 @@ output "stackset_name" {
 
 output "stack_instances" {
   description = "Stack instance details"
-  value = concat(
-    [
-      for instance in aws_cloudformation_stack_set_instance.accounts : {
-        account_id = instance.account_id
-        region     = instance.region
-        stack_id   = instance.stack_id
-      }
-    ],
-    [
-      for instance in aws_cloudformation_stack_set_instance.multi_account : {
-        account_id = instance.account_id
-        region     = instance.region
-        stack_id   = instance.stack_id
-      }
-    ]
-  )
+  value = [
+    for instance in aws_cloudformation_stack_set_instance.accounts : {
+      account_id = instance.account_id
+      region     = instance.region
+      stack_id   = instance.stack_id
+    }
+  ]
 }
 
 output "org_stackset_id" {
@@ -39,14 +30,14 @@ output "org_stackset_id" {
 }
 
 output "multi_account_instances" {
-  description = "Multi-account stack instances"
-  value = [
-    for instance in aws_cloudformation_stack_set_instance.multi_account : {
-      account_id = instance.account_id
-      region     = instance.region
-      stack_id   = instance.stack_id
-    }
-  ]
+  description = "Multi-account stack instances (managed by AWS Organizations)"
+  value = var.enable_multi_account ? {
+    organizational_units = var.organizational_units
+    auto_deployment_enabled = true
+  } : {
+    organizational_units = []
+    auto_deployment_enabled = false
+  }
 }
 
 output "deployment_summary" {
