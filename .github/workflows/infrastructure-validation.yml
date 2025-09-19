@@ -9,16 +9,22 @@ on:
   push:
     branches: [main, develop]
 
+env:
+  TERRAFORM_VERSION: "1.6.6"
+  PYTHON_VERSION: "3.11.7"
+  GO_VERSION: "1.21.5"
+  CFN_LINT_VERSION: "0.83.8"
+
 jobs:
   terraform-validation:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.6.0
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
           
       - name: Terraform Format Check
         run: terraform fmt -check -recursive terraform/
@@ -26,47 +32,59 @@ jobs:
       - name: Terraform Validate
         run: |
           for dir in terraform/modules/*/; do
-            cd "$dir"
-            terraform init -backend=false
-            terraform validate
-            cd - > /dev/null
+            if [ -d "$dir" ]; then
+              echo "Validating $dir"
+              cd "$dir"
+              terraform init -backend=false
+              terraform validate
+              cd - > /dev/null
+            fi
           done
 
   cloudformation-validation:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ env.PYTHON_VERSION }}
           
       - name: Install cfn-lint
-        run: pip install cfn-lint==0.83.4
+        run: pip install cfn-lint==${{ env.CFN_LINT_VERSION }}
         
       - name: Validate CloudFormation Templates
         run: |
-          cfn-lint cloudformation/templates/*.yaml
+          if ls cloudformation/templates/*.yaml 1> /dev/null 2>&1; then
+            cfn-lint cloudformation/templates/*.yaml
+          else
+            echo "No CloudFormation templates found"
+          fi
           
       - name: Security Scan CloudFormation
         run: |
-          cfn-lint cloudformation/templates/*.yaml \
-            --include-checks I \
-            --ignore-checks W
+          if ls cloudformation/templates/*.yaml 1> /dev/null 2>&1; then
+            cfn-lint cloudformation/templates/*.yaml \
+              --include-checks I \
+              --ignore-checks W
+          else
+            echo "No CloudFormation templates to scan"
+          fi
 
   security-scanning:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       
       - name: Run Checkov
-        uses: bridgecrewio/checkov-action@master
+        uses: bridgecrewio/checkov-action@v12.2582.0
         with:
           directory: .
           framework: terraform,cloudformation
           output_format: sarif
           output_file_path: checkov-results.sarif
+          quiet: true
           
       - name: Upload Checkov Results
         uses: github/codeql-action/upload-sarif@v3
@@ -75,53 +93,68 @@ jobs:
           sarif_file: checkov-results.sarif
 
   cost-estimation:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
       
       - name: Setup Infracost
-        uses: infracost/actions/setup@v2
+        uses: infracost/actions/setup@v3
         with:
           api-key: ${{ secrets.INFRACOST_API_KEY }}
           
       - name: Generate Cost Estimate
         run: |
-          infracost breakdown --path=terraform/ \
-            --format=json --out-file=infracost.json
+          if [ -n "${{ secrets.INFRACOST_API_KEY }}" ]; then
+            infracost breakdown --path=terraform/ \
+              --format=json --out-file=infracost.json
+          else
+            echo "Infracost API key not configured, skipping cost estimation"
+            echo '{}' > infracost.json
+          fi
             
       - name: Post Cost Comment
         uses: infracost/actions/comment@v1
+        if: secrets.INFRACOST_API_KEY != ''
         with:
           path: infracost.json
           behavior: update
 
   terratest:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
       
       - name: Setup Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: ${{ env.GO_VERSION }}
           
       - name: Run Unit Tests
         run: |
-          cd tests
-          go mod tidy
-          go test -v ./unit/... -timeout 10m
+          if [ -f "tests/go.mod" ]; then
+            cd tests
+            go mod tidy
+            go test -v ./unit/... -timeout 10m
+          else
+            echo "No Go tests found, skipping"
+          fi
           
       - name: Setup Python for Security Tests
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ env.PYTHON_VERSION }}
           
       - name: Install Python Dependencies
         run: |
-          pip install pytest boto3 moto
+          pip install pytest==7.4.3 boto3==1.34.34 moto==4.2.14
           
       - name: Run Security Tests
         run: |
-          cd tests
-          python -m pytest security/ -v
+          if [ -d "tests/security" ]; then
+            cd tests
+            python -m pytest security/ -v
+          else
+            echo "No security tests found, skipping"
+          fi

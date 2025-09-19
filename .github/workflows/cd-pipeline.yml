@@ -5,6 +5,14 @@ on:
     workflows: ["CI Pipeline - Development Integration"]
     types: [completed]
     branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target Environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options: ['dev', 'staging', 'production']
 
 permissions:
   id-token: write
@@ -14,8 +22,8 @@ permissions:
 jobs:
   determine-deployment:
     name: 'Determine Deployment Strategy'
-    runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-22.04
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     outputs:
       environment: ${{ steps.env.outputs.environment }}
       deploy_to_eks: ${{ steps.strategy.outputs.deploy_to_eks }}
@@ -25,7 +33,9 @@ jobs:
     - name: Determine Environment
       id: env
       run: |
-        if [[ "${{ github.event.workflow_run.head_branch }}" == "main" ]]; then
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.event.workflow_run.head_branch }}" == "main" ]]; then
           echo "environment=production" >> $GITHUB_OUTPUT
         elif [[ "${{ github.event.workflow_run.head_branch }}" == "develop" ]]; then
           echo "environment=staging" >> $GITHUB_OUTPUT
@@ -48,7 +58,11 @@ jobs:
     - name: Container Image
       id: image
       run: |
-        echo "image=ghcr.io/${{ github.repository }}:${{ github.event.workflow_run.head_sha }}" >> $GITHUB_OUTPUT
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          echo "image=ghcr.io/${{ github.repository }}:${{ github.sha }}" >> $GITHUB_OUTPUT
+        else
+          echo "image=ghcr.io/${{ github.repository }}:${{ github.event.workflow_run.head_sha }}" >> $GITHUB_OUTPUT
+        fi
 
   deploy-application:
     name: 'Deploy Application'
@@ -56,7 +70,7 @@ jobs:
     uses: ./.github/workflows/cd-deployment.yml
     with:
       application_name: "sbom-security-pipeline"
-      application_version: ${{ github.event.workflow_run.head_sha }}
+      application_version: ${{ github.event.workflow_run.head_sha || github.sha }}
       environment: ${{ needs.determine-deployment.outputs.environment }}
       container_image: ${{ needs.determine-deployment.outputs.container_image }}
       deploy_to_eks: ${{ needs.determine-deployment.outputs.deploy_to_eks == 'true' }}
@@ -66,15 +80,19 @@ jobs:
 
   post-deployment:
     name: 'Post-Deployment Actions'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: [determine-deployment, deploy-application]
     if: always()
     steps:
     - name: Deployment Status
       run: |
+        echo "# 📊 CD Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+        echo "- Environment: ${{ needs.determine-deployment.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Container: ${{ needs.determine-deployment.outputs.container_image }}" >> $GITHUB_STEP_SUMMARY
+        
         if [[ "${{ needs.deploy-application.outputs.deployment_successful }}" == "true" ]]; then
-          echo "🎉 Deployment to ${{ needs.determine-deployment.outputs.environment }} successful!"
+          echo "🎉 Deployment to ${{ needs.determine-deployment.outputs.environment }} successful!" >> $GITHUB_STEP_SUMMARY
         else
-          echo "💥 Deployment to ${{ needs.determine-deployment.outputs.environment }} failed!"
+          echo "💥 Deployment to ${{ needs.determine-deployment.outputs.environment }} failed!" >> $GITHUB_STEP_SUMMARY
           exit 1
         fi

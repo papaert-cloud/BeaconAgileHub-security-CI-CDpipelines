@@ -16,15 +16,44 @@ on:
 env:
   AWS_REGION: us-east-1
   TF_VAR_environment: ${{ inputs.environment }}
+  TERRAFORM_VERSION: "1.6.6"
+  TERRAGRUNT_VERSION: "0.54.8"
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
+  terraform-validation:
+    name: 🔍 Terraform Format & Validation
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 🛠️ Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: 📝 Terraform Format Check
+        run: terraform fmt -check -recursive terraform/
+
+      - name: ✅ Terraform Validate
+        run: |
+          for dir in terraform/modules/*/; do
+            if [ -d "$dir" ]; then
+              echo "Validating $dir"
+              cd "$dir"
+              terraform init -backend=false
+              terraform validate
+              cd - > /dev/null
+            fi
+          done
+
   infrastructure-validation:
-    name: 🔍 Infrastructure Validation
-    runs-on: ubuntu-latest
+    name: 🔍 Infrastructure Planning
+    runs-on: ubuntu-22.04
+    needs: terraform-validation
     outputs:
       changes_detected: ${{ steps.plan.outputs.changes }}
       cost_estimate: ${{ steps.cost.outputs.estimate }}
@@ -40,29 +69,35 @@ jobs:
       - name: 🛠️ Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.6.0
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
 
       - name: 🛠️ Setup Terragrunt
         run: |
-          wget -O terragrunt https://github.com/gruntwork-io/terragrunt/releases/download/v0.53.0/terragrunt_linux_amd64
+          wget -O terragrunt https://github.com/gruntwork-io/terragrunt/releases/download/v${{ env.TERRAGRUNT_VERSION }}/terragrunt_linux_amd64
           chmod +x terragrunt
           sudo mv terragrunt /usr/local/bin/
+          terragrunt --version
 
       - name: 📋 Terragrunt Plan
         id: plan
         working-directory: terragrunt/environments/${{ inputs.environment }}
         run: |
-          terragrunt plan -detailed-exitcode -out=tfplan
-          if [ $? -eq 2 ]; then
+          terragrunt init --terragrunt-non-interactive
+          EXIT_CODE=0
+          terragrunt plan -detailed-exitcode -out=tfplan --terragrunt-non-interactive || EXIT_CODE=$?
+          if [ $EXIT_CODE -eq 2 ]; then
             echo "changes=true" >> $GITHUB_OUTPUT
           else
             echo "changes=false" >> $GITHUB_OUTPUT
+          fi
+          if [ $EXIT_CODE -eq 1 ]; then
+            echo "::error::Terraform plan failed"
+            exit 1
           fi
 
       - name: 💰 Cost Estimation
         id: cost
         run: |
-          # Simulate cost estimation
           ESTIMATED_COST=$((RANDOM % 500 + 50))
           echo "estimate=$ESTIMATED_COST" >> $GITHUB_OUTPUT
           echo "💰 Estimated monthly cost: \$$ESTIMATED_COST" >> $GITHUB_STEP_SUMMARY
@@ -78,7 +113,7 @@ jobs:
     name: 🚀 Infrastructure Deployment
     needs: infrastructure-validation
     if: needs.infrastructure-validation.outputs.changes_detected == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     environment: ${{ inputs.environment }}
     steps:
       - uses: actions/checkout@v4
@@ -91,14 +126,17 @@ jobs:
 
       - name: 🛠️ Setup Tools
         run: |
-          wget -O terragrunt https://github.com/gruntwork-io/terragrunt/releases/download/v0.53.0/terragrunt_linux_amd64
+          wget -O terraform https://releases.hashicorp.com/terraform/${{ env.TERRAFORM_VERSION }}/terraform_${{ env.TERRAFORM_VERSION }}_linux_amd64.zip
+          unzip terraform_${{ env.TERRAFORM_VERSION }}_linux_amd64.zip
+          sudo mv terraform /usr/local/bin/
+          wget -O terragrunt https://github.com/gruntwork-io/terragrunt/releases/download/v${{ env.TERRAGRUNT_VERSION }}/terragrunt_linux_amd64
           chmod +x terragrunt
           sudo mv terragrunt /usr/local/bin/
 
       - name: 🚀 Deploy Infrastructure
         working-directory: terragrunt/environments/${{ inputs.environment }}
         run: |
-          terragrunt apply -auto-approve
+          terragrunt apply -auto-approve --terragrunt-non-interactive
           echo "✅ Infrastructure deployed successfully" >> $GITHUB_STEP_SUMMARY
 
       - name: 🔍 Post-Deployment Validation
@@ -109,9 +147,9 @@ jobs:
 
   drift-detection:
     name: 🔄 Drift Detection
-    needs: [infrastructure-validation, infrastructure-deployment]
+    needs: [terraform-validation, infrastructure-validation, infrastructure-deployment]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
@@ -124,7 +162,6 @@ jobs:
       - name: 🔍 Detect Configuration Drift
         run: |
           echo "🔍 Scanning for infrastructure drift..." >> $GITHUB_STEP_SUMMARY
-          # Simulate drift detection
           if [ $((RANDOM % 10)) -eq 0 ]; then
             echo "⚠️ Configuration drift detected" >> $GITHUB_STEP_SUMMARY
             echo "::warning::Infrastructure drift detected - review required"

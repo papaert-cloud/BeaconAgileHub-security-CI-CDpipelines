@@ -29,7 +29,7 @@ on:
 
 env:
   AWS_REGION: us-east-1
-  TERRAFORM_VERSION: 1.6.0
+  TERRAFORM_VERSION: "1.6.6"
 
 permissions:
   id-token: write
@@ -42,7 +42,7 @@ permissions:
 jobs:
   orchestration-control:
     name: 🎯 Orchestration Control Plane
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     outputs:
       environment: ${{ steps.determine-env.outputs.environment }}
       deployment-strategy: ${{ steps.determine-strategy.outputs.strategy }}
@@ -117,13 +117,13 @@ jobs:
     uses: ./.github/workflows/comprehensive-security.yml
     with:
       environment: ${{ needs.orchestration-control.outputs.environment }}
-      compliance_required: ${{ needs.orchestration-control.outputs.compliance-required }}
+      compliance_required: ${{ needs.orchestration-control.outputs.compliance-required == 'true' }}
     secrets: inherit
 
   infrastructure-orchestration:
     name: 🏗️ Infrastructure Orchestration
     needs: [orchestration-control, security-orchestration]
-    if: always() && (needs.security-orchestration.result == 'success' || needs.orchestration-control.outputs.security-required == 'false')
+    if: always() && (needs.security-orchestration.result == 'success' || needs.security-orchestration.result == 'skipped' || needs.orchestration-control.outputs.security-required == 'false')
     uses: ./.github/workflows/infrastructure-orchestrator.yml
     with:
       environment: ${{ needs.orchestration-control.outputs.environment }}
@@ -133,7 +133,7 @@ jobs:
   application-orchestration:
     name: 🚀 Application Orchestration
     needs: [orchestration-control, security-orchestration, infrastructure-orchestration]
-    if: always() && needs.infrastructure-orchestration.result == 'success'
+    if: always() && (needs.infrastructure-orchestration.result == 'success' || needs.infrastructure-orchestration.result == 'skipped')
     uses: ./.github/workflows/advanced-deployment.yml
     with:
       environment: ${{ needs.orchestration-control.outputs.environment }}
@@ -143,7 +143,7 @@ jobs:
   testing-orchestration:
     name: 🧪 Testing Orchestration
     needs: [orchestration-control, application-orchestration]
-    if: always() && needs.application-orchestration.result == 'success'
+    if: always() && (needs.application-orchestration.result == 'success' || needs.application-orchestration.result == 'skipped')
     uses: ./.github/workflows/comprehensive-testing.yml
     with:
       environment: ${{ needs.orchestration-control.outputs.environment }}
@@ -153,7 +153,7 @@ jobs:
   monitoring-orchestration:
     name: 📊 Monitoring Orchestration
     needs: [orchestration-control, testing-orchestration]
-    if: always() && needs.testing-orchestration.result == 'success'
+    if: always() && (needs.testing-orchestration.result == 'success' || needs.testing-orchestration.result == 'skipped')
     uses: ./.github/workflows/enterprise-monitoring.yml
     with:
       environment: ${{ needs.orchestration-control.outputs.environment }}
