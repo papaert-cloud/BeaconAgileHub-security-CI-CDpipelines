@@ -1,0 +1,117 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Enterprise Security Stack - KMS, S3, IAM, CloudWatch'
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Project name for resource naming
+  Environment:
+    Type: String
+    Description: Environment (dev/staging/production)
+    AllowedValues: [dev, staging, production]
+
+Resources:
+  SecurityKMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for security stack encryption
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-security-key'
+        - Key: Environment
+          Value: !Ref Environment
+
+  SecurityKMSAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/${ProjectName}-${Environment}-security'
+      TargetKeyId: !Ref SecurityKMSKey
+
+  SecurityArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectName}-${Environment}-security-artifacts-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref SecurityKMSKey
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-security-bucket'
+        - Key: Environment
+          Value: !Ref Environment
+
+  SecurityLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/security/${ProjectName}-${Environment}'
+      RetentionInDays: 365
+      KmsKeyId: !Ref SecurityKMSKey
+
+  SecurityOperationsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-${Environment}-security-ops'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-security-role'
+        - Key: Environment
+          Value: !Ref Environment
+
+  SecurityPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: SecurityOperationsPolicy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Resource:
+              - !GetAtt SecurityArtifactsBucket.Arn
+              - !Sub '${SecurityArtifactsBucket}/*'
+              - !GetAtt SecurityLogGroup.Arn
+              - !Ref SecurityKMSKey
+      Roles:
+        - !Ref SecurityOperationsRole
+
+Outputs:
+  KMSKeyId:
+    Description: KMS Key ID for security encryption
+    Value: !Ref SecurityKMSKey
+  SecurityBucketName:
+    Description: S3 bucket for security artifacts
+    Value: !Ref SecurityArtifactsBucket
+  SecurityRoleArn:
+    Description: IAM role ARN for security operations
+    Value: !GetAtt SecurityOperationsRole.Arn

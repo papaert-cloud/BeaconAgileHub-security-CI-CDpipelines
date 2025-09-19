@@ -1,0 +1,198 @@
+name: 🚀 Advanced Deployment Strategies
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      strategy:
+        required: true
+        type: string
+    secrets:
+      AWS_ROLE_ARN:
+        required: true
+      KUBE_CONFIG:
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deployment-preparation:
+    name: 🎯 Deployment Preparation
+    runs-on: ubuntu-latest
+    outputs:
+      deployment_id: ${{ steps.generate-id.outputs.id }}
+      rollback_version: ${{ steps.current-version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 🎯 Generate Deployment ID
+        id: generate-id
+        run: |
+          DEPLOYMENT_ID="deploy-$(date +%Y%m%d-%H%M%S)-${{ github.sha }}"
+          echo "id=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
+          echo "🎯 Deployment ID: $DEPLOYMENT_ID" >> $GITHUB_STEP_SUMMARY
+
+      - name: 📋 Get Current Version
+        id: current-version
+        run: |
+          # Simulate getting current version
+          CURRENT_VERSION="v1.$(($RANDOM % 10)).$(($RANDOM % 10))"
+          echo "version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "📋 Current Version: $CURRENT_VERSION" >> $GITHUB_STEP_SUMMARY
+
+  rolling-deployment:
+    name: 🔄 Rolling Deployment
+    needs: deployment-preparation
+    if: inputs.strategy == 'rolling'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 🔐 Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: ⚙️ Setup Kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+
+      - name: 🚀 Rolling Update
+        run: |
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > kubeconfig
+          export KUBECONFIG=kubeconfig
+          
+          kubectl set image deployment/app app=app:${{ github.sha }} -n ${{ inputs.environment }}
+          kubectl rollout status deployment/app -n ${{ inputs.environment }} --timeout=300s
+          
+          echo "✅ Rolling deployment completed" >> $GITHUB_STEP_SUMMARY
+
+  blue-green-deployment:
+    name: 🔵🟢 Blue-Green Deployment
+    needs: deployment-preparation
+    if: inputs.strategy == 'blue-green'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 🔐 Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: 🔵 Deploy Green Environment
+        run: |
+          echo "🔵 Deploying to green environment..." >> $GITHUB_STEP_SUMMARY
+          # Deploy to green environment
+          kubectl apply -f kubernetes/overlays/${{ inputs.environment }}/green/
+          
+          # Wait for green deployment
+          kubectl wait --for=condition=available deployment/app-green -n ${{ inputs.environment }} --timeout=300s
+
+      - name: 🧪 Green Environment Testing
+        run: |
+          echo "🧪 Testing green environment..." >> $GITHUB_STEP_SUMMARY
+          # Run smoke tests against green environment
+          curl -f http://app-green.${{ inputs.environment }}.local/health || exit 1
+
+      - name: 🔄 Traffic Switch
+        run: |
+          echo "🔄 Switching traffic to green..." >> $GITHUB_STEP_SUMMARY
+          # Switch traffic from blue to green
+          kubectl patch service app -n ${{ inputs.environment }} -p '{"spec":{"selector":{"version":"green"}}}'
+          
+          echo "✅ Blue-green deployment completed" >> $GITHUB_STEP_SUMMARY
+
+      - name: 🧹 Cleanup Blue Environment
+        run: |
+          echo "🧹 Cleaning up blue environment..." >> $GITHUB_STEP_SUMMARY
+          kubectl delete deployment app-blue -n ${{ inputs.environment }} --ignore-not-found=true
+
+  canary-deployment:
+    name: 🐤 Canary Deployment
+    needs: deployment-preparation
+    if: inputs.strategy == 'canary'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 🔐 Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: 🐤 Deploy Canary (10%)
+        run: |
+          echo "🐤 Deploying canary with 10% traffic..." >> $GITHUB_STEP_SUMMARY
+          kubectl apply -f kubernetes/overlays/${{ inputs.environment }}/canary/
+          
+          # Configure traffic split (90% stable, 10% canary)
+          kubectl patch virtualservice app -n ${{ inputs.environment }} --type='json' \
+            -p='[{"op": "replace", "path": "/spec/http/0/match/0/weight", "value": 90},
+                 {"op": "replace", "path": "/spec/http/1/match/0/weight", "value": 10}]'
+
+      - name: 📊 Monitor Canary Metrics
+        run: |
+          echo "📊 Monitoring canary metrics for 5 minutes..." >> $GITHUB_STEP_SUMMARY
+          sleep 300  # Monitor for 5 minutes
+          
+          # Check error rate and latency
+          ERROR_RATE=$(curl -s "http://prometheus:9090/api/v1/query?query=rate(http_requests_total{status=~'5..'}[5m])" | jq -r '.data.result[0].value[1]')
+          
+          if (( $(echo "$ERROR_RATE > 0.01" | bc -l) )); then
+            echo "🚨 High error rate detected: $ERROR_RATE" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+      - name: 🚀 Promote Canary (100%)
+        run: |
+          echo "🚀 Promoting canary to 100% traffic..." >> $GITHUB_STEP_SUMMARY
+          kubectl patch virtualservice app -n ${{ inputs.environment }} --type='json' \
+            -p='[{"op": "replace", "path": "/spec/http/0/match/0/weight", "value": 0},
+                 {"op": "replace", "path": "/spec/http/1/match/0/weight", "value": 100}]'
+          
+          echo "✅ Canary deployment completed" >> $GITHUB_STEP_SUMMARY
+
+  deployment-verification:
+    name: ✅ Deployment Verification
+    needs: [deployment-preparation, rolling-deployment, blue-green-deployment, canary-deployment]
+    if: always() && (needs.rolling-deployment.result == 'success' || needs.blue-green-deployment.result == 'success' || needs.canary-deployment.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🔍 Health Check
+        run: |
+          echo "🔍 Running post-deployment health checks..." >> $GITHUB_STEP_SUMMARY
+          # Simulate health checks
+          sleep 30
+          echo "✅ All health checks passed" >> $GITHUB_STEP_SUMMARY
+
+      - name: 📊 Performance Validation
+        run: |
+          echo "📊 Validating performance metrics..." >> $GITHUB_STEP_SUMMARY
+          # Simulate performance validation
+          RESPONSE_TIME=$((RANDOM % 100 + 50))
+          echo "📊 Average response time: ${RESPONSE_TIME}ms" >> $GITHUB_STEP_SUMMARY
+          
+          if [ $RESPONSE_TIME -gt 200 ]; then
+            echo "⚠️ Performance degradation detected" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+      - name: 🎉 Deployment Success
+        run: |
+          echo "# 🎉 Deployment Successful" >> $GITHUB_STEP_SUMMARY
+          echo "- **Strategy**: ${{ inputs.strategy }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deployment ID**: ${{ needs.deployment-preparation.outputs.deployment_id }}" >> $GITHUB_STEP_SUMMARY

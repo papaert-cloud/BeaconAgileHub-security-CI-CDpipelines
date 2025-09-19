@@ -1,0 +1,100 @@
+name: Security Gates - Reusable Workflow
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      severity_threshold:
+        required: false
+        type: string
+        default: 'high'
+      enable_sbom:
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      AWS_ROLE_ARN:
+        required: true
+      SNYK_TOKEN:
+        required: true
+
+jobs:
+  sast-scan:
+    name: Static Application Security Testing
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+          
+      - name: CodeQL Analysis
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python, javascript, go
+          
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+  sca-scan:
+    name: Software Composition Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Snyk Security Scan
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=${{ inputs.severity_threshold }}
+
+  sbom-generation:
+    name: SBOM Generation & Vulnerability Scan
+    runs-on: ubuntu-latest
+    if: ${{ inputs.enable_sbom }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Syft
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+          
+      - name: Install Grype
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+          
+      - name: Generate SBOM
+        run: |
+          syft . -o cyclonedx-json=sbom.json
+          
+      - name: Vulnerability Scan
+        run: |
+          grype sbom:sbom.json -o json --file vulnerability-report.json
+          
+      - name: Upload SBOM to AWS
+        run: |
+          aws s3 cp sbom.json s3://sbom-artifacts-${{ inputs.environment }}/$(date +%Y%m%d)/
+          aws s3 cp vulnerability-report.json s3://sbom-artifacts-${{ inputs.environment }}/$(date +%Y%m%d)/
+
+  compliance-check:
+    name: ICS Compliance Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: CIS Benchmark Check
+        run: |
+          docker run --rm -v $(pwd):/workspace aquasec/trivy config /workspace
+          
+      - name: SLSA Provenance Generation
+        uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v1.9.0

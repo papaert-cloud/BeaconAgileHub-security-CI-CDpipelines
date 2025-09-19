@@ -1,0 +1,25 @@
+# Security Review Requirements
+# Global code owners for security-critical files
+
+# Infrastructure and Security Configuration
+terraform/                    @security-team @platform-team
+terragrunt/                   @security-team @platform-team
+kubernetes/policies/          @security-team @k8s-team
+.github/workflows/            @security-team @devops-team
+
+# Application Security
+app/                         @security-team @dev-team
+Dockerfile                   @security-team @dev-team
+
+# Compliance and Documentation
+docs/                        @security-team @compliance-team
+*.md                         @security-team
+
+# Security-Critical Files (Require 2 approvals)
+**/*security*                @security-team @security-lead
+**/*compliance*              @security-team @compliance-team
+**/policies/                 @security-team @security-lead
+
+# Environment-Specific Overrides
+terraform/environments/production/  @security-lead @platform-lead
+terragrunt/environments/production/ @security-lead @platform-lead

@@ -1,0 +1,294 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Enterprise StackSet - Multi-Account AWS Resource Provisioning'
+
+Parameters:
+  OrgName:
+    Type: String
+    Description: Organization name
+    Default: 'acme-corp'
+  Environment:
+    Type: String
+    Description: Environment tier
+    AllowedValues: [dev, staging, prod, shared]
+    Default: 'dev'
+  Region:
+    Type: String
+    Description: Primary AWS region
+    Default: 'us-east-1'
+  VpcCidr:
+    Type: String
+    Description: VPC CIDR block
+    Default: '10.0.0.0/16'
+  EnableMultiAccount:
+    Type: String
+    Description: Enable cross-account resources
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+
+Conditions:
+  IsProduction: !Equals [!Ref Environment, 'prod']
+  IsMultiAccount: !Equals [!Ref EnableMultiAccount, 'true']
+  IsSharedServices: !Equals [!Ref Environment, 'shared']
+
+Resources:
+  # Core Networking
+  MainVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${OrgName}-${Environment}-vpc'
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MainVPC
+      CidrBlock: !Select [0, !Cidr [!Ref VpcCidr, 4, 8]]
+      AvailabilityZone: !Sub '${Region}a'
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${OrgName}-${Environment}-public-subnet'
+
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MainVPC
+      CidrBlock: !Select [1, !Cidr [!Ref VpcCidr, 4, 8]]
+      AvailabilityZone: !Sub '${Region}a'
+      Tags:
+        - Key: Name
+          Value: !Sub '${OrgName}-${Environment}-private-subnet'
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${OrgName}-${Environment}-igw'
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref MainVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # Security & IAM
+  MasterKMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: Master encryption key
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM policies
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${OrgName}-${Environment}-master-key'
+
+  CrossAccountRole:
+    Type: AWS::IAM::Role
+    Condition: IsMultiAccount
+    Properties:
+      RoleName: !Sub '${OrgName}-${Environment}-cross-account-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/PowerUserAccess
+
+  # Storage
+  DataLake:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${OrgName}-${Environment}-datalake-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref MasterKMSKey
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # Compute
+  EKSCluster:
+    Type: AWS::EKS::Cluster
+    Properties:
+      Name: !Sub '${OrgName}-${Environment}-cluster'
+      Version: '1.28'
+      RoleArn: !GetAtt EKSServiceRole.Arn
+      ResourcesVpcConfig:
+        SubnetIds:
+          - !Ref PublicSubnet
+          - !Ref PrivateSubnet
+        SecurityGroupIds:
+          - !Ref EKSSecurityGroup
+      EncryptionConfig:
+        - Resources: ['secrets']
+          Provider:
+            KeyArn: !GetAtt MasterKMSKey.Arn
+
+  EKSServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: eks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+
+  EKSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: EKS cluster security group
+      VpcId: !Ref MainVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref VpcCidr
+
+  # Database
+  RDSSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for RDS
+      SubnetIds:
+        - !Ref PrivateSubnet
+        - !Ref PublicSubnet
+      Tags:
+        - Key: Name
+          Value: !Sub '${OrgName}-${Environment}-db-subnet-group'
+
+  DatabaseCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      DBClusterIdentifier: !Sub '${OrgName}-${Environment}-aurora'
+      Engine: aurora-postgresql
+      EngineVersion: '15.4'
+      MasterUsername: dbadmin
+      ManageMasterUserPassword: true
+      MasterUserSecret:
+        KmsKeyId: !Ref MasterKMSKey
+      DBSubnetGroupName: !Ref RDSSubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref DatabaseSecurityGroup
+      StorageEncrypted: true
+      KmsKeyId: !Ref MasterKMSKey
+      BackupRetentionPeriod: !If [IsProduction, 30, 7]
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Database security group
+      VpcId: !Ref MainVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref EKSSecurityGroup
+
+  # Monitoring & Observability
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/${OrgName}/${Environment}/application'
+      RetentionInDays: !If [IsProduction, 365, 30]
+
+  # Shared Services (Transit Gateway, etc.)
+  TransitGateway:
+    Type: AWS::EC2::TransitGateway
+    Condition: IsSharedServices
+    Properties:
+      AmazonSideAsn: 64512
+      Description: Organization transit gateway
+      Tags:
+        - Key: Name
+          Value: !Sub '${OrgName}-shared-tgw'
+
+  # Lambda for automation
+  AutomationFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${OrgName}-${Environment}-automation'
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          def handler(event, context):
+              return {'statusCode': 200, 'body': json.dumps('Automation function')}
+      Environment:
+        Variables:
+          ORG_NAME: !Ref OrgName
+          ENVIRONMENT: !Ref Environment
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  # EventBridge for orchestration
+  EventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub '${OrgName}-${Environment}-events'
+
+Outputs:
+  VpcId:
+    Description: VPC ID
+    Value: !Ref MainVPC
+    Export:
+      Name: !Sub '${OrgName}-${Environment}-vpc-id'
+  
+  KMSKeyId:
+    Description: Master KMS Key ID
+    Value: !Ref MasterKMSKey
+    Export:
+      Name: !Sub '${OrgName}-${Environment}-kms-key'
+  
+  EKSClusterName:
+    Description: EKS Cluster Name
+    Value: !Ref EKSCluster
+    Export:
+      Name: !Sub '${OrgName}-${Environment}-eks-cluster'
+  
+  DatabaseEndpoint:
+    Description: Database cluster endpoint
+    Value: !GetAtt DatabaseCluster.Endpoint.Address
+    Export:
+      Name: !Sub '${OrgName}-${Environment}-db-endpoint'
+  
+  DataLakeBucket:
+    Description: Data lake S3 bucket
+    Value: !Ref DataLake
+    Export:
+      Name: !Sub '${OrgName}-${Environment}-datalake'
