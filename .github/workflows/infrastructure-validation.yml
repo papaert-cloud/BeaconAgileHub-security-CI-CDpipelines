@@ -14,15 +14,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.6.0
-          
+
       - name: Terraform Format Check
         run: terraform fmt -check -recursive terraform/
-        
+
       - name: Terraform Validate
         run: |
           for dir in terraform/modules/*/; do
@@ -36,19 +36,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-          
+
       - name: Install cfn-lint
         run: pip install cfn-lint==0.83.4
-        
+
       - name: Validate CloudFormation Templates
         run: |
           cfn-lint cloudformation/templates/*.yaml
-          
+
       - name: Security Scan CloudFormation
         run: |
           cfn-lint cloudformation/templates/*.yaml \
@@ -59,7 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Run Checkov
         uses: bridgecrewio/checkov-action@master
         with:
@@ -67,7 +67,7 @@ jobs:
           framework: terraform,cloudformation
           output_format: sarif
           output_file_path: checkov-results.sarif
-          
+
       - name: Upload Checkov Results
         uses: github/codeql-action/upload-sarif@v3
         if: always()
@@ -78,17 +78,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Infracost
         uses: infracost/actions/setup@v2
         with:
           api-key: ${{ secrets.INFRACOST_API_KEY }}
-          
+
       - name: Generate Cost Estimate
         run: |
           infracost breakdown --path=terraform/ \
             --format=json --out-file=infracost.json
-            
+
       - name: Post Cost Comment
         uses: infracost/actions/comment@v1
         with:
@@ -100,27 +100,27 @@ jobs:
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Go
         uses: actions/setup-go@v4
         with:
           go-version: '1.21'
-          
+
       - name: Run Unit Tests
         run: |
           cd tests
           go mod tidy
           go test -v ./unit/... -timeout 10m
-          
+
       - name: Setup Python for Security Tests
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-          
+
       - name: Install Python Dependencies
         run: |
           pip install pytest boto3 moto
-          
+
       - name: Run Security Tests
         run: |
           cd tests

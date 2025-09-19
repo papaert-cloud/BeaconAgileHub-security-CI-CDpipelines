@@ -37,8 +37,8 @@ jobs:
       - name: 📊 Analyze Current Costs
         id: analyze
         run: |
-          echo "📊 Analyzing current cost structure..." >> $GITHUB_STEP_SUMMARY
-          
+          echo "📊 Analyzing current cost structure..." >> "${GITHUB_STEP_SUMMARY}"
+
           # Get current month costs
           CURRENT_COST=$(aws ce get-cost-and-usage \
             --time-period Start=$(date -d "$(date +%Y-%m-01)" +%Y-%m-%d),End=$(date +%Y-%m-%d) \
@@ -46,23 +46,23 @@ jobs:
             --metrics BlendedCost \
             --query 'ResultsByTime[0].Total.BlendedCost.Amount' \
             --output text 2>/dev/null || echo "150")
-          
+
           # Project monthly cost
           DAYS_IN_MONTH=$(date -d "$(date +%Y-%m-01) +1 month -1 day" +%d)
           CURRENT_DAY=$(date +%d)
           PROJECTED_COST=$(echo "scale=2; $CURRENT_COST * $DAYS_IN_MONTH / $CURRENT_DAY" | bc -l 2>/dev/null || echo "300")
-          
+
           # Calculate optimization potential
           OPTIMIZATION_POTENTIAL=$(echo "scale=2; $PROJECTED_COST * 0.25" | bc -l 2>/dev/null || echo "75")
-          
-          echo "current=$CURRENT_COST" >> $GITHUB_OUTPUT
-          echo "projected=$PROJECTED_COST" >> $GITHUB_OUTPUT
-          echo "potential=$OPTIMIZATION_POTENTIAL" >> $GITHUB_OUTPUT
-          
-          echo "## 💰 Cost Analysis Results" >> $GITHUB_STEP_SUMMARY
-          echo "- **Current Month**: \$${CURRENT_COST}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Projected Monthly**: \$${PROJECTED_COST}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Optimization Potential**: \$${OPTIMIZATION_POTENTIAL}" >> $GITHUB_STEP_SUMMARY
+
+          echo "current=$CURRENT_COST" >> "${GITHUB_OUTPUT}"
+          echo "projected=$PROJECTED_COST" >> "${GITHUB_OUTPUT}"
+          echo "potential=$OPTIMIZATION_POTENTIAL" >> "${GITHUB_OUTPUT}"
+
+          echo "## 💰 Cost Analysis Results" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Current Month**: \$${CURRENT_COST}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Projected Monthly**: \$${PROJECTED_COST}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Optimization Potential**: \$${OPTIMIZATION_POTENTIAL}" >> "${GITHUB_STEP_SUMMARY}"
 
   resource-rightsizing:
     name: 📏 Resource Rightsizing
@@ -79,8 +79,8 @@ jobs:
 
       - name: 📏 Analyze EC2 Rightsizing
         run: |
-          echo "📏 Analyzing EC2 rightsizing opportunities..." >> $GITHUB_STEP_SUMMARY
-          
+          echo "📏 Analyzing EC2 rightsizing opportunities..." >> "${GITHUB_STEP_SUMMARY}"
+
           # Get rightsizing recommendations
           aws ce get-rightsizing-recommendation \
             --service EC2-Instance \
@@ -88,24 +88,24 @@ jobs:
               "BenefitsConsidered": true,
               "RecommendationTarget": "SAME_INSTANCE_FAMILY"
             }' > rightsizing.json 2>/dev/null || echo '{"RightsizingRecommendations":[]}' > rightsizing.json
-          
+
           RECOMMENDATIONS=$(jq '.RightsizingRecommendations | length' rightsizing.json)
-          
-          echo "- **EC2 Rightsizing Opportunities**: $RECOMMENDATIONS instances" >> $GITHUB_STEP_SUMMARY
-          
+
+          echo "- **EC2 Rightsizing Opportunities**: $RECOMMENDATIONS instances" >> "${GITHUB_STEP_SUMMARY}"
+
           if [ "$RECOMMENDATIONS" -gt 0 ]; then
-            echo "🎯 Rightsizing recommendations available" >> $GITHUB_STEP_SUMMARY
+            echo "🎯 Rightsizing recommendations available" >> "${GITHUB_STEP_SUMMARY}"
           else
-            echo "✅ All instances optimally sized" >> $GITHUB_STEP_SUMMARY
+            echo "✅ All instances optimally sized" >> "${GITHUB_STEP_SUMMARY}"
           fi
 
       - name: 📏 Analyze RDS Rightsizing
         run: |
-          echo "📏 Analyzing RDS rightsizing opportunities..." >> $GITHUB_STEP_SUMMARY
-          
+          echo "📏 Analyzing RDS rightsizing opportunities..." >> "${GITHUB_STEP_SUMMARY}"
+
           # Simulate RDS analysis
           RDS_RECOMMENDATIONS=$((RANDOM % 3))
-          echo "- **RDS Rightsizing Opportunities**: $RDS_RECOMMENDATIONS instances" >> $GITHUB_STEP_SUMMARY
+          echo "- **RDS Rightsizing Opportunities**: $RDS_RECOMMENDATIONS instances" >> "${GITHUB_STEP_SUMMARY}"
 
   reserved-instance-optimization:
     name: 🏦 Reserved Instance Optimization
@@ -122,27 +122,27 @@ jobs:
 
       - name: 🏦 Analyze RI Recommendations
         run: |
-          echo "🏦 Analyzing Reserved Instance opportunities..." >> $GITHUB_STEP_SUMMARY
-          
+          echo "🏦 Analyzing Reserved Instance opportunities..." >> "${GITHUB_STEP_SUMMARY}"
+
           # Get RI recommendations
           aws ce get-reservation-purchase-recommendation \
             --service EC2-Instance \
             --payment-option ALL_UPFRONT \
             --term-in-years ONE_YEAR > ri-recommendations.json 2>/dev/null || echo '{"Recommendations":[]}' > ri-recommendations.json
-          
+
           RI_COUNT=$(jq '.Recommendations | length' ri-recommendations.json)
           ESTIMATED_SAVINGS=$(jq -r '.Recommendations[0].RecommendationDetails.EstimatedMonthlySavingsAmount // "0"' ri-recommendations.json)
-          
-          echo "- **RI Recommendations**: $RI_COUNT instances" >> $GITHUB_STEP_SUMMARY
-          echo "- **Estimated Monthly Savings**: \$${ESTIMATED_SAVINGS}" >> $GITHUB_STEP_SUMMARY
+
+          echo "- **RI Recommendations**: $RI_COUNT instances" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Estimated Monthly Savings**: \$${ESTIMATED_SAVINGS}" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: 🎯 Spot Instance Analysis
         run: |
-          echo "🎯 Analyzing Spot Instance opportunities..." >> $GITHUB_STEP_SUMMARY
-          
+          echo "🎯 Analyzing Spot Instance opportunities..." >> "${GITHUB_STEP_SUMMARY}"
+
           # Simulate spot instance analysis
           SPOT_SAVINGS=$((RANDOM % 200 + 50))
-          echo "- **Potential Spot Savings**: \$${SPOT_SAVINGS}/month" >> $GITHUB_STEP_SUMMARY
+          echo "- **Potential Spot Savings**: \$${SPOT_SAVINGS}/month" >> "${GITHUB_STEP_SUMMARY}"
 
   storage-optimization:
     name: 💾 Storage Optimization
@@ -159,31 +159,31 @@ jobs:
 
       - name: 💾 Analyze EBS Optimization
         run: |
-          echo "💾 Analyzing EBS storage optimization..." >> $GITHUB_STEP_SUMMARY
-          
+          echo "💾 Analyzing EBS storage optimization..." >> "${GITHUB_STEP_SUMMARY}"
+
           # Get EBS volumes
           aws ec2 describe-volumes \
             --query 'Volumes[?State==`available`].[VolumeId,Size,VolumeType]' \
             --output table > unused-volumes.txt 2>/dev/null || echo "No unused volumes" > unused-volumes.txt
-          
+
           UNUSED_VOLUMES=$(grep -c "vol-" unused-volumes.txt 2>/dev/null || echo "0")
-          
-          echo "- **Unused EBS Volumes**: $UNUSED_VOLUMES" >> $GITHUB_STEP_SUMMARY
-          
+
+          echo "- **Unused EBS Volumes**: $UNUSED_VOLUMES" >> "${GITHUB_STEP_SUMMARY}"
+
           if [ "$UNUSED_VOLUMES" -gt 0 ]; then
-            echo "💡 Consider deleting unused volumes" >> $GITHUB_STEP_SUMMARY
+            echo "💡 Consider deleting unused volumes" >> "${GITHUB_STEP_SUMMARY}"
           fi
 
       - name: 📦 Analyze S3 Optimization
         run: |
-          echo "📦 Analyzing S3 storage optimization..." >> $GITHUB_STEP_SUMMARY
-          
+          echo "📦 Analyzing S3 storage optimization..." >> "${GITHUB_STEP_SUMMARY}"
+
           # Simulate S3 analysis
           LIFECYCLE_SAVINGS=$((RANDOM % 100 + 20))
           IA_SAVINGS=$((RANDOM % 150 + 30))
-          
-          echo "- **Lifecycle Policy Savings**: \$${LIFECYCLE_SAVINGS}/month" >> $GITHUB_STEP_SUMMARY
-          echo "- **Intelligent Tiering Savings**: \$${IA_SAVINGS}/month" >> $GITHUB_STEP_SUMMARY
+
+          echo "- **Lifecycle Policy Savings**: \$${LIFECYCLE_SAVINGS}/month" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Intelligent Tiering Savings**: \$${IA_SAVINGS}/month" >> "${GITHUB_STEP_SUMMARY}"
 
   auto-scaling-optimization:
     name: 📈 Auto Scaling Optimization
@@ -194,19 +194,19 @@ jobs:
 
       - name: 📈 Analyze Auto Scaling Efficiency
         run: |
-          echo "📈 Analyzing auto scaling efficiency..." >> $GITHUB_STEP_SUMMARY
-          
+          echo "📈 Analyzing auto scaling efficiency..." >> "${GITHUB_STEP_SUMMARY}"
+
           # Simulate auto scaling analysis
           SCALING_EFFICIENCY=$((RANDOM % 30 + 70))
           POTENTIAL_SAVINGS=$((RANDOM % 100 + 25))
-          
-          echo "- **Current Scaling Efficiency**: ${SCALING_EFFICIENCY}%" >> $GITHUB_STEP_SUMMARY
-          echo "- **Optimization Potential**: \$${POTENTIAL_SAVINGS}/month" >> $GITHUB_STEP_SUMMARY
-          
+
+          echo "- **Current Scaling Efficiency**: ${SCALING_EFFICIENCY}%" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Optimization Potential**: \$${POTENTIAL_SAVINGS}/month" >> "${GITHUB_STEP_SUMMARY}"
+
           if [ "$SCALING_EFFICIENCY" -lt 80 ]; then
-            echo "💡 Consider optimizing auto scaling policies" >> $GITHUB_STEP_SUMMARY
+            echo "💡 Consider optimizing auto scaling policies" >> "${GITHUB_STEP_SUMMARY}"
           else
-            echo "✅ Auto scaling policies well optimized" >> $GITHUB_STEP_SUMMARY
+            echo "✅ Auto scaling policies well optimized" >> "${GITHUB_STEP_SUMMARY}"
           fi
 
   cost-governance:
@@ -224,8 +224,8 @@ jobs:
 
       - name: 🏛️ Implement Cost Controls
         run: |
-          echo "🏛️ Implementing cost governance controls..." >> $GITHUB_STEP_SUMMARY
-          
+          echo "🏛️ Implementing cost governance controls..." >> "${GITHUB_STEP_SUMMARY}"
+
           # Create cost allocation tags policy
           aws organizations create-policy \
             --name "CostAllocationTags-${{ inputs.environment }}" \
@@ -243,16 +243,16 @@ jobs:
                 }
               }
             }' 2>/dev/null || echo "Policy creation skipped"
-          
-          echo "✅ Cost governance policies applied" >> $GITHUB_STEP_SUMMARY
+
+          echo "✅ Cost governance policies applied" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: 🚨 Setup Cost Alerts
         run: |
-          echo "🚨 Configuring cost alerts..." >> $GITHUB_STEP_SUMMARY
-          
+          echo "🚨 Configuring cost alerts..." >> "${GITHUB_STEP_SUMMARY}"
+
           THRESHOLD="${{ inputs.threshold }}"
           WARNING_THRESHOLD=$(echo "scale=0; $THRESHOLD * 0.8 / 1" | bc)
-          
+
           # Create budget alert
           aws budgets create-budget \
             --account-id $(aws sts get-caller-identity --query Account --output text) \
@@ -276,8 +276,8 @@ jobs:
                 "Address": "devops@company.com"
               }]
             }]' 2>/dev/null || echo "Budget alert creation skipped"
-          
-          echo "✅ Cost alerts configured (Threshold: \$${THRESHOLD})" >> $GITHUB_STEP_SUMMARY
+
+          echo "✅ Cost alerts configured (Threshold: \$${THRESHOLD})" >> "${GITHUB_STEP_SUMMARY}"
 
   optimization-summary:
     name: 📋 Optimization Summary
@@ -293,31 +293,31 @@ jobs:
     steps:
       - name: 📋 Generate Optimization Report
         run: |
-          echo "# 💰 Cost Optimization Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 📊 Current Cost Analysis" >> $GITHUB_STEP_SUMMARY
-          echo "- **Environment**: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Current Cost**: \$${{ needs.cost-analysis.outputs.current_cost }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Projected Monthly**: \$${{ needs.cost-analysis.outputs.projected_cost }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Optimization Potential**: \$${{ needs.cost-analysis.outputs.optimization_potential }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 🎯 Optimization Areas" >> $GITHUB_STEP_SUMMARY
-          echo "| Area | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Resource Rightsizing | ${{ needs.resource-rightsizing.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Reserved Instances | ${{ needs.reserved-instance-optimization.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Storage Optimization | ${{ needs.storage-optimization.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Auto Scaling | ${{ needs.auto-scaling-optimization.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Cost Governance | ${{ needs.cost-governance.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "# 💰 Cost Optimization Summary" >> "${GITHUB_STEP_SUMMARY}"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "## 📊 Current Cost Analysis" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Environment**: ${{ inputs.environment }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Current Cost**: \$${{ needs.cost-analysis.outputs.current_cost }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Projected Monthly**: \$${{ needs.cost-analysis.outputs.projected_cost }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Optimization Potential**: \$${{ needs.cost-analysis.outputs.optimization_potential }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "## 🎯 Optimization Areas" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Area | Status |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "|------|--------|" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Resource Rightsizing | ${{ needs.resource-rightsizing.result }} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Reserved Instances | ${{ needs.reserved-instance-optimization.result }} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Storage Optimization | ${{ needs.storage-optimization.result }} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Auto Scaling | ${{ needs.auto-scaling-optimization.result }} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Cost Governance | ${{ needs.cost-governance.result }} |" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: 🚨 Cost Threshold Check
         run: |
           PROJECTED="${{ needs.cost-analysis.outputs.projected_cost }}"
           THRESHOLD="${{ inputs.threshold }}"
-          
+
           if (( $(echo "$PROJECTED > $THRESHOLD" | bc -l) )); then
             echo "::warning::Projected cost (\$$PROJECTED) exceeds threshold (\$$THRESHOLD)"
-            echo "🚨 Cost optimization required" >> $GITHUB_STEP_SUMMARY
+            echo "🚨 Cost optimization required" >> "${GITHUB_STEP_SUMMARY}"
           else
-            echo "✅ Costs within acceptable threshold" >> $GITHUB_STEP_SUMMARY
+            echo "✅ Costs within acceptable threshold" >> "${GITHUB_STEP_SUMMARY}"
           fi

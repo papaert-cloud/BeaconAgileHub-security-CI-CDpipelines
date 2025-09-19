@@ -32,15 +32,15 @@ jobs:
         id: generate-id
         run: |
           TEST_ID="test-$(date +%Y%m%d-%H%M%S)"
-          echo "id=$TEST_ID" >> $GITHUB_OUTPUT
+          echo "id=${TEST_ID}" >> "${GITHUB_OUTPUT}"
 
       - name: 🌐 Get Application URL
         id: get-url
         run: |
           case "${{ inputs.environment }}" in
-            production) echo "url=https://app.production.example.com" >> $GITHUB_OUTPUT ;;
-            staging) echo "url=https://app.staging.example.com" >> $GITHUB_OUTPUT ;;
-            *) echo "url=https://app.dev.example.com" >> $GITHUB_OUTPUT ;;
+            production) echo "url=https://app.production.example.com" >> "${GITHUB_OUTPUT}" ;;
+            staging) echo "url=https://app.staging.example.com" >> "${GITHUB_OUTPUT}" ;;
+            *) echo "url=https://app.dev.example.com" >> "${GITHUB_OUTPUT}" ;;
           esac
 
   unit-tests:
@@ -121,7 +121,7 @@ jobs:
         working-directory: tests/integration
         run: |
           go test -v ./... -tags=integration
-          echo "✅ Integration tests completed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Integration tests completed" >> "${GITHUB_STEP_SUMMARY}"
 
   contract-tests:
     name: 📋 Contract Tests
@@ -134,11 +134,11 @@ jobs:
         run: |
           # Install Pact CLI
           curl -fsSL https://raw.githubusercontent.com/pact-foundation/pact-ruby-standalone/master/install.sh | bash
-          
+
           # Run contract tests
-          echo "📋 Running API contract tests..." >> $GITHUB_STEP_SUMMARY
+          echo "📋 Running API contract tests..." >> "${GITHUB_STEP_SUMMARY}"
           # pact-broker publish pacts/
-          echo "✅ Contract tests completed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Contract tests completed" >> "${GITHUB_STEP_SUMMARY}"
 
   e2e-tests:
     name: 🌐 End-to-End Tests
@@ -159,7 +159,7 @@ jobs:
         run: |
           BASE_URL="${{ needs.test-preparation.outputs.base_url }}"
           npx playwright test --project=${{ matrix.browser }} --base-url=$BASE_URL
-          echo "✅ E2E tests completed for ${{ matrix.browser }}" >> $GITHUB_STEP_SUMMARY
+          echo "✅ E2E tests completed for ${{ matrix.browser }}" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: 📊 Upload E2E Results
         uses: actions/upload-artifact@v4
@@ -185,11 +185,11 @@ jobs:
           echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
           sudo apt-get update
           sudo apt-get install k6
-          
+
           # Run performance tests
           BASE_URL="${{ needs.test-preparation.outputs.base_url }}"
           k6 run --env BASE_URL=$BASE_URL tests/performance/load-test.js
-          echo "✅ Performance tests completed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Performance tests completed" >> "${GITHUB_STEP_SUMMARY}"
 
   security-tests:
     name: 🔒 Security Tests
@@ -209,7 +209,7 @@ jobs:
         run: |
           BASE_URL="${{ needs.test-preparation.outputs.base_url }}"
           curl -I $BASE_URL | grep -E "(X-Frame-Options|X-Content-Type-Options|Strict-Transport-Security)"
-          echo "✅ Security headers validated" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Security headers validated" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: 📊 Upload Security Results
         uses: actions/upload-artifact@v4
@@ -228,12 +228,12 @@ jobs:
 
       - name: 🌪️ Chaos Testing with Litmus
         run: |
-          echo "🌪️ Running chaos engineering tests..." >> $GITHUB_STEP_SUMMARY
+          echo "🌪️ Running chaos engineering tests..." >> "${GITHUB_STEP_SUMMARY}"
           # Simulate chaos tests
-          echo "- Pod failure simulation: ✅" >> $GITHUB_STEP_SUMMARY
-          echo "- Network latency injection: ✅" >> $GITHUB_STEP_SUMMARY
-          echo "- CPU stress test: ✅" >> $GITHUB_STEP_SUMMARY
-          echo "✅ System resilience validated" >> $GITHUB_STEP_SUMMARY
+          echo "- Pod failure simulation: ✅" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Network latency injection: ✅" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- CPU stress test: ✅" >> "${GITHUB_STEP_SUMMARY}"
+          echo "✅ System resilience validated" >> "${GITHUB_STEP_SUMMARY}"
 
   test-reporting:
     name: 📊 Test Reporting
@@ -252,23 +252,23 @@ jobs:
     steps:
       - name: 📊 Generate Test Report
         run: |
-          echo "# 🧪 Comprehensive Testing Report" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 📋 Test Suite Results" >> $GITHUB_STEP_SUMMARY
-          echo "| Test Type | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Unit Tests | ${{ needs.unit-tests.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Integration Tests | ${{ needs.integration-tests.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Contract Tests | ${{ needs.contract-tests.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| E2E Tests | ${{ needs.e2e-tests.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Performance Tests | ${{ needs.performance-tests.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Security Tests | ${{ needs.security-tests.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Chaos Engineering | ${{ needs.chaos-engineering.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 🎯 Test Environment" >> $GITHUB_STEP_SUMMARY
-          echo "- **Environment**: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Base URL**: ${{ needs.test-preparation.outputs.base_url }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Test Suite ID**: ${{ needs.test-preparation.outputs.test_suite_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "# 🧪 Comprehensive Testing Report" >> "${GITHUB_STEP_SUMMARY}"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "## 📋 Test Suite Results" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Test Type | Status |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "|-----------|--------|" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Unit Tests | ${{ needs.unit-tests.result }} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Integration Tests | ${{ needs.integration-tests.result }} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Contract Tests | ${{ needs.contract-tests.result }} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| E2E Tests | ${{ needs.e2e-tests.result }} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Performance Tests | ${{ needs.performance-tests.result }} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Security Tests | ${{ needs.security-tests.result }} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Chaos Engineering | ${{ needs.chaos-engineering.result || 'skipped' }} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "## 🎯 Test Environment" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Environment**: ${{ inputs.environment }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Base URL**: ${{ needs.test-preparation.outputs.base_url }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Test Suite ID**: ${{ needs.test-preparation.outputs.test_suite_id }}" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: 🚨 Test Failure Alert
         if: failure()

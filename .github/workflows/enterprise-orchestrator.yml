@@ -58,13 +58,13 @@ jobs:
         id: determine-env
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+            echo "environment=${{ github.event.inputs.environment }}" >> "${GITHUB_OUTPUT}"
           elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            echo "environment=production" >> $GITHUB_OUTPUT
+            echo "environment=production" >> "${GITHUB_OUTPUT}"
           elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
-            echo "environment=staging" >> $GITHUB_OUTPUT
+            echo "environment=staging" >> "${GITHUB_OUTPUT}"
           else
-            echo "environment=dev" >> $GITHUB_OUTPUT
+            echo "environment=dev" >> "${GITHUB_OUTPUT}"
           fi
 
       - name: 🚀 Determine Deployment Strategy
@@ -72,22 +72,22 @@ jobs:
         run: |
           ENV="${{ steps.determine-env.outputs.environment }}"
           if [[ "${{ github.event.inputs.deployment_strategy }}" != "" ]]; then
-            echo "strategy=${{ github.event.inputs.deployment_strategy }}" >> $GITHUB_OUTPUT
+            echo "strategy=${{ github.event.inputs.deployment_strategy }}" >> "${GITHUB_OUTPUT}"
           elif [[ "$ENV" == "production" ]]; then
-            echo "strategy=blue-green" >> $GITHUB_OUTPUT
+            echo "strategy=blue-green" >> "${GITHUB_OUTPUT}"
           elif [[ "$ENV" == "staging" ]]; then
-            echo "strategy=canary" >> $GITHUB_OUTPUT
+            echo "strategy=canary" >> "${GITHUB_OUTPUT}"
           else
-            echo "strategy=rolling" >> $GITHUB_OUTPUT
+            echo "strategy=rolling" >> "${GITHUB_OUTPUT}"
           fi
 
       - name: 🔒 Security Requirements Check
         id: security-check
         run: |
           if [[ "${{ github.event.inputs.skip_security }}" == "true" ]]; then
-            echo "required=false" >> $GITHUB_OUTPUT
+            echo "required=false" >> "${GITHUB_OUTPUT}"
           else
-            echo "required=true" >> $GITHUB_OUTPUT
+            echo "required=true" >> "${GITHUB_OUTPUT}"
           fi
 
       - name: 💰 Cost Analysis Threshold
@@ -95,9 +95,9 @@ jobs:
         run: |
           ENV="${{ steps.determine-env.outputs.environment }}"
           case $ENV in
-            production) echo "threshold=1000" >> $GITHUB_OUTPUT ;;
-            staging) echo "threshold=500" >> $GITHUB_OUTPUT ;;
-            *) echo "threshold=100" >> $GITHUB_OUTPUT ;;
+            production) echo "threshold=1000" >> "${GITHUB_OUTPUT}" ;;
+            staging) echo "threshold=500" >> "${GITHUB_OUTPUT}" ;;
+            *) echo "threshold=100" >> "${GITHUB_OUTPUT}" ;;
           esac
 
       - name: 📋 Compliance Requirements
@@ -105,9 +105,9 @@ jobs:
         run: |
           ENV="${{ steps.determine-env.outputs.environment }}"
           if [[ "$ENV" == "production" ]]; then
-            echo "required=true" >> $GITHUB_OUTPUT
+            echo "required=true" >> "${GITHUB_OUTPUT}"
           else
-            echo "required=false" >> $GITHUB_OUTPUT
+            echo "required=false" >> "${GITHUB_OUTPUT}"
           fi
 
   security-orchestration:
@@ -195,24 +195,24 @@ jobs:
     steps:
       - name: 📊 Generate Deployment Summary
         run: |
-          echo "# 🚀 Enterprise DevSecOps Orchestration Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 🎯 Deployment Details" >> $GITHUB_STEP_SUMMARY
-          echo "- **Environment**: ${{ needs.orchestration-control.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Strategy**: ${{ needs.orchestration-control.outputs.deployment-strategy }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Security Gates**: ${{ needs.orchestration-control.outputs.security-required }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Compliance Required**: ${{ needs.orchestration-control.outputs.compliance-required }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 📋 Pipeline Results" >> $GITHUB_STEP_SUMMARY
-          echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Security | ${{ needs.security-orchestration.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Infrastructure | ${{ needs.infrastructure-orchestration.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Application | ${{ needs.application-orchestration.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Testing | ${{ needs.testing-orchestration.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Monitoring | ${{ needs.monitoring-orchestration.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Cost Optimization | ${{ needs.cost-optimization.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Compliance | ${{ needs.compliance-orchestration.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "# 🚀 Enterprise DevSecOps Orchestration Summary" >> "${GITHUB_STEP_SUMMARY}"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "## 🎯 Deployment Details" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Environment**: ${{ needs.orchestration-control.outputs.environment }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Strategy**: ${{ needs.orchestration-control.outputs.deployment-strategy }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Security Gates**: ${{ needs.orchestration-control.outputs.security-required }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Compliance Required**: ${{ needs.orchestration-control.outputs.compliance-required }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "## 📋 Pipeline Results" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Stage | Status |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "|-------|--------|" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Security | ${{ needs.security-orchestration.result || 'skipped' }} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Infrastructure | ${{ needs.infrastructure-orchestration.result }} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Application | ${{ needs.application-orchestration.result }} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Testing | ${{ needs.testing-orchestration.result }} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Monitoring | ${{ needs.monitoring-orchestration.result }} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Cost Optimization | ${{ needs.cost-optimization.result }} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Compliance | ${{ needs.compliance-orchestration.result || 'skipped' }} |" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: ✅ Success Notification
         if: success()
