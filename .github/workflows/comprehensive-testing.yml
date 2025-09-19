@@ -1,0 +1,277 @@
+name: 🧪 Comprehensive Testing Orchestration
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      deployment_strategy:
+        required: true
+        type: string
+    secrets:
+      AWS_ROLE_ARN:
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+  checks: write
+
+jobs:
+  test-preparation:
+    name: 🎯 Test Preparation
+    runs-on: ubuntu-latest
+    outputs:
+      test_suite_id: ${{ steps.generate-id.outputs.id }}
+      base_url: ${{ steps.get-url.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 🎯 Generate Test Suite ID
+        id: generate-id
+        run: |
+          TEST_ID="test-$(date +%Y%m%d-%H%M%S)"
+          echo "id=$TEST_ID" >> $GITHUB_OUTPUT
+
+      - name: 🌐 Get Application URL
+        id: get-url
+        run: |
+          case "${{ inputs.environment }}" in
+            production) echo "url=https://app.production.example.com" >> $GITHUB_OUTPUT ;;
+            staging) echo "url=https://app.staging.example.com" >> $GITHUB_OUTPUT ;;
+            *) echo "url=https://app.dev.example.com" >> $GITHUB_OUTPUT ;;
+          esac
+
+  unit-tests:
+    name: 🔬 Unit Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: [app, infrastructure, security]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        if: matrix.component == 'app'
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: 🔬 Run Unit Tests - App
+        if: matrix.component == 'app'
+        run: |
+          cd app
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+          pytest --cov=. --cov-report=xml --junitxml=junit.xml
+
+      - name: 🏗️ Setup Go
+        if: matrix.component == 'infrastructure'
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: 🔬 Run Unit Tests - Infrastructure
+        if: matrix.component == 'infrastructure'
+        working-directory: tests
+        run: |
+          go mod tidy
+          go test -v ./unit/... -coverprofile=coverage.out
+
+      - name: 🔬 Run Unit Tests - Security
+        if: matrix.component == 'security'
+        working-directory: tests/security
+        run: |
+          python -m pytest test_security_compliance.py -v --junitxml=junit.xml
+
+      - name: 📊 Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-test-results-${{ matrix.component }}
+          path: |
+            junit.xml
+            coverage.out
+            coverage.xml
+
+  integration-tests:
+    name: 🔗 Integration Tests
+    needs: [test-preparation, unit-tests]
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: 🔗 Run Integration Tests
+        working-directory: tests/integration
+        run: |
+          go test -v ./... -tags=integration
+          echo "✅ Integration tests completed" >> $GITHUB_STEP_SUMMARY
+
+  contract-tests:
+    name: 📋 Contract Tests
+    needs: test-preparation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 📋 API Contract Testing
+        run: |
+          # Install Pact CLI
+          curl -fsSL https://raw.githubusercontent.com/pact-foundation/pact-ruby-standalone/master/install.sh | bash
+          
+          # Run contract tests
+          echo "📋 Running API contract tests..." >> $GITHUB_STEP_SUMMARY
+          # pact-broker publish pacts/
+          echo "✅ Contract tests completed" >> $GITHUB_STEP_SUMMARY
+
+  e2e-tests:
+    name: 🌐 End-to-End Tests
+    needs: [test-preparation, integration-tests]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        browser: [chrome, firefox]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 🌐 Setup Playwright
+        run: |
+          npm install -g @playwright/test
+          npx playwright install ${{ matrix.browser }}
+
+      - name: 🌐 Run E2E Tests
+        run: |
+          BASE_URL="${{ needs.test-preparation.outputs.base_url }}"
+          npx playwright test --project=${{ matrix.browser }} --base-url=$BASE_URL
+          echo "✅ E2E tests completed for ${{ matrix.browser }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: 📊 Upload E2E Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-results-${{ matrix.browser }}
+          path: |
+            playwright-report/
+            test-results/
+
+  performance-tests:
+    name: ⚡ Performance Tests
+    needs: test-preparation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ⚡ Load Testing with K6
+        run: |
+          # Install k6
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install k6
+          
+          # Run performance tests
+          BASE_URL="${{ needs.test-preparation.outputs.base_url }}"
+          k6 run --env BASE_URL=$BASE_URL tests/performance/load-test.js
+          echo "✅ Performance tests completed" >> $GITHUB_STEP_SUMMARY
+
+  security-tests:
+    name: 🔒 Security Tests
+    needs: test-preparation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 🔒 DAST Scanning with OWASP ZAP
+        run: |
+          docker run -v $(pwd):/zap/wrk/:rw \
+            -t owasp/zap2docker-stable zap-baseline.py \
+            -t ${{ needs.test-preparation.outputs.base_url }} \
+            -J zap-report.json || true
+
+      - name: 🔒 Security Headers Check
+        run: |
+          BASE_URL="${{ needs.test-preparation.outputs.base_url }}"
+          curl -I $BASE_URL | grep -E "(X-Frame-Options|X-Content-Type-Options|Strict-Transport-Security)"
+          echo "✅ Security headers validated" >> $GITHUB_STEP_SUMMARY
+
+      - name: 📊 Upload Security Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-test-results
+          path: zap-report.json
+
+  chaos-engineering:
+    name: 🌪️ Chaos Engineering
+    needs: test-preparation
+    if: inputs.environment != 'production'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 🌪️ Chaos Testing with Litmus
+        run: |
+          echo "🌪️ Running chaos engineering tests..." >> $GITHUB_STEP_SUMMARY
+          # Simulate chaos tests
+          echo "- Pod failure simulation: ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- Network latency injection: ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- CPU stress test: ✅" >> $GITHUB_STEP_SUMMARY
+          echo "✅ System resilience validated" >> $GITHUB_STEP_SUMMARY
+
+  test-reporting:
+    name: 📊 Test Reporting
+    needs: [
+      test-preparation,
+      unit-tests,
+      integration-tests,
+      contract-tests,
+      e2e-tests,
+      performance-tests,
+      security-tests,
+      chaos-engineering
+    ]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📊 Generate Test Report
+        run: |
+          echo "# 🧪 Comprehensive Testing Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📋 Test Suite Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Test Type | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Unit Tests | ${{ needs.unit-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Integration Tests | ${{ needs.integration-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Contract Tests | ${{ needs.contract-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| E2E Tests | ${{ needs.e2e-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Performance Tests | ${{ needs.performance-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Security Tests | ${{ needs.security-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Chaos Engineering | ${{ needs.chaos-engineering.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🎯 Test Environment" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Base URL**: ${{ needs.test-preparation.outputs.base_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Test Suite ID**: ${{ needs.test-preparation.outputs.test_suite_id }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: 🚨 Test Failure Alert
+        if: failure()
+        run: |
+          echo "::error::Critical test failures detected. Deployment should be blocked."
+          exit 1

@@ -2,7 +2,7 @@ name: 'CD Pipeline - Multi-Platform Deployment'
 
 on:
   workflow_run:
-    workflows: ["CI Pipeline - Security First"]
+    workflows: ["CI Pipeline - Development Integration"]
     types: [completed]
     branches: [main, develop]
 
@@ -53,7 +53,7 @@ jobs:
   deploy-application:
     name: 'Deploy Application'
     needs: determine-deployment
-    uses: ./.github/workflows/_reusable/cd-deployment.yml
+    uses: ./.github/workflows/cd-deployment.yml
     with:
       application_name: "sbom-security-pipeline"
       application_version: ${{ github.event.workflow_run.head_sha }}

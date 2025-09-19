@@ -30,7 +30,7 @@ jobs:
   security-gates:
     name: Security Gates
     needs: determine-environment
-    uses: ./.github/workflows/_reusable/security-gates.yml
+    uses: ./.github/workflows/security-gates.yml
     with:
       environment: ${{ needs.determine-environment.outputs.environment }}
       severity_threshold: 'medium'
@@ -74,6 +74,7 @@ jobs:
             type=sha,prefix={{branch}}-
             
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: ./app
@@ -81,17 +82,25 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+        
       - name: Sign container image
         run: |
           cosign sign --yes ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
           
+      - name: Install Syft and Grype
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+          
       - name: Generate SBOM for container
         run: |
-          syft ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} -o cyclonedx-json=container-sbom.json
+          syft ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }} -o cyclonedx-json=container-sbom.json
           
       - name: Container Security Scan
         run: |
-          grype ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} -o json --file container-vulnerabilities.json
+          grype ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }} -o json --file container-vulnerabilities.json
 
   ics-security-validation:
     name: ICS Security Validation

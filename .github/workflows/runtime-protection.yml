@@ -1,0 +1,67 @@
+name: Runtime Protection - Kyverno/Falco
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      cluster_name:
+        required: false
+        type: string
+        default: 'sbom-cluster'
+    secrets:
+      AWS_ROLE_ARN:
+        required: true
+
+jobs:
+  kyverno-policies:
+    name: Deploy Kyverno Policies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --name ${{ inputs.cluster_name }}-${{ inputs.environment }}
+      - name: Install Kyverno
+        run: |
+          kubectl apply -f https://github.com/kyverno/kyverno/releases/latest/download/install.yaml
+      - name: Apply Security Policies
+        run: |
+          kubectl apply -f kubernetes/policies/
+
+  falco-monitoring:
+    name: Deploy Falco Runtime Security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+      - name: Deploy Falco
+        run: |
+          helm repo add falcosecurity https://falcosecurity.github.io/charts
+          helm upgrade --install falco falcosecurity/falco --namespace falco-system --create-namespace
+      - name: Configure Falco Rules
+        run: |
+          kubectl apply -f - <<EOF
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: falco-rules
+            namespace: falco-system
+          data:
+            custom_rules.yaml: |
+              - rule: Unauthorized Process in Container
+                desc: Detect unauthorized processes
+                condition: spawned_process and container and not proc.name in (allowed_processes)
+                output: Unauthorized process (user=%user.name command=%proc.cmdline)
+                priority: WARNING
+          EOF
