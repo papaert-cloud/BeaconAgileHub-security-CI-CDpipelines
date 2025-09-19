@@ -63,7 +63,7 @@ jobs:
 
       - name: Security Scan Infrastructure
         run: |
-          docker run --rm -v $(pwd):/workspace bridgecrew/checkov -d /workspace/terragrunt --framework terraform
+          docker run --rm -v "$(pwd)":/workspace bridgecrew/checkov -d /workspace/terragrunt --framework terraform
 
   terraform-apply:
     name: Terraform Apply

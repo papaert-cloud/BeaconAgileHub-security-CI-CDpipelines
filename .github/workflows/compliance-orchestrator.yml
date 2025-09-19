@@ -243,7 +243,7 @@ jobs:
 
   audit-trail-generation:
     name: 📝 Audit Trail Generation
-    needs: [slsa-compliance, ssdf-compliance, sox-compliance, pci-compliance, gdpr-compliance]
+    needs: [compliance-assessment, slsa-compliance, ssdf-compliance, sox-compliance, pci-compliance, gdpr-compliance]
     if: always()
     runs-on: ubuntu-latest
     steps:

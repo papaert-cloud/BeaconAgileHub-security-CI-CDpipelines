@@ -58,7 +58,7 @@ jobs:
         run: |
           docker build -t security-scan:latest ./app
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-            -v $(pwd):/tmp aquasec/trivy image security-scan:latest
+            -v "$(pwd)":/tmp aquasec/trivy image security-scan:latest
 
       - name: 📋 Upload SARIF Results
         if: always()

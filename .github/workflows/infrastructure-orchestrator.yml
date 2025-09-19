@@ -69,7 +69,7 @@ jobs:
 
       - name: 🚨 Cost Threshold Check
         run: |
-          if [ ${{ steps.cost.outputs.estimate }} -gt ${{ inputs.cost_threshold }} ]; then
+          if [ "${{ steps.cost.outputs.estimate }}" -gt "${{ inputs.cost_threshold }}" ]; then
             echo "::error::Cost estimate (${{ steps.cost.outputs.estimate }}) exceeds threshold (${{ inputs.cost_threshold }})"
             exit 1
           fi

@@ -94,7 +94,7 @@ jobs:
 
       - name: CIS Benchmark Check
         run: |
-          docker run --rm -v $(pwd):/workspace aquasec/trivy config /workspace
+          docker run --rm -v "$(pwd)":/workspace aquasec/trivy config /workspace
 
       - name: SLSA Provenance Generation
         uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v1.9.0

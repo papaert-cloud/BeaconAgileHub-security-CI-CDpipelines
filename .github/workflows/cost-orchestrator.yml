@@ -251,11 +251,11 @@ jobs:
           echo "🚨 Configuring cost alerts..." >> "${GITHUB_STEP_SUMMARY}"
 
           THRESHOLD="${{ inputs.threshold }}"
-          WARNING_THRESHOLD=$(echo "scale=0; $THRESHOLD * 0.8 / 1" | bc)
+          WARNING_THRESHOLD=$(echo "scale=0; ${THRESHOLD} * 0.8 / 1" | bc)
 
           # Create budget alert
           aws budgets create-budget \
-            --account-id $(aws sts get-caller-identity --query Account --output text) \
+            --account-id "$(aws sts get-caller-identity --query Account --output text)" \
             --budget '{
               "BudgetName": "CostAlert-${{ inputs.environment }}",
               "BudgetLimit": {

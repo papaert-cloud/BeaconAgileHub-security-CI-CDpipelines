@@ -196,7 +196,7 @@ jobs:
           esac)
 
           aws budgets create-budget \
-            --account-id $(aws sts get-caller-identity --query Account --output text) \
+            --account-id "$(aws sts get-caller-identity --query Account --output text)" \
             --budget '{
               "BudgetName": "Monthly-Budget-${{ inputs.environment }}",
               "BudgetLimit": {

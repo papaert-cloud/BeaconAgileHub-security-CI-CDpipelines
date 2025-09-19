@@ -200,7 +200,7 @@ jobs:
 
       - name: 🔒 DAST Scanning with OWASP ZAP
         run: |
-          docker run -v $(pwd):/zap/wrk/:rw \
+          docker run -v "$(pwd)":/zap/wrk/:rw \
             -t owasp/zap2docker-stable zap-baseline.py \
             -t ${{ needs.test-preparation.outputs.base_url }} \
             -J zap-report.json || true
