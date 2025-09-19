@@ -1,4 +1,4 @@
-name: Runtime Protection - Kyverno/Falco
+name: 🔒 Runtime Protection - Kyverno/Falco
 
 on:
   workflow_call:

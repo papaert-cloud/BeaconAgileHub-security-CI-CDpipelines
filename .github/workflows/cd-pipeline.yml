@@ -1,4 +1,4 @@
-name: 'CD Pipeline - Multi-Platform Deployment'
+name: '🚀 CD Pipeline - Multi-Platform Deployment'
 
 on:
   workflow_run:

@@ -1,4 +1,4 @@
-name: Infrastructure Deployment - Reusable Workflow
+name: 🏢 Infrastructure Deployment - Reusable Workflow
 
 on:
   workflow_call:

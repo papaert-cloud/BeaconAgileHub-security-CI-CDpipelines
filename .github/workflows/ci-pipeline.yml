@@ -1,4 +1,4 @@
-name: CI Pipeline - Development Integration
+name: 🔄 CI Pipeline - Development Integration
 
 on:
   push:

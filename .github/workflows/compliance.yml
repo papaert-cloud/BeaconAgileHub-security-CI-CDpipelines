@@ -1,4 +1,4 @@
-name: Compliance Validation - ICS/SLSA/CIS
+name: 📋 Compliance Validation - ICS/SLSA/CIS
 
 on:
   workflow_call:

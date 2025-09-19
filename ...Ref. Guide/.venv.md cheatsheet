@@ -1,0 +1,101 @@
+1. Create and Initialize a .venv Environment
+bash
+# Run in your project directory (Windows/WSL/Linux/Mac)
+python3 -m venv .venv
+
+# Or for Windows (PowerShell/cmd):
+python -m venv .venv
+
+2. Activate the .venv
+
+Linux / macOS / WSL:
+
+bash
+source .venv/bin/activate
+
+Windows (Powershell):
+
+powershell
+.\.venv\Scripts\Activate
+Windows (cmd):
+
+text
+.venv\Scripts\activate.bat
+
+3. Verify Activation (all platforms)
+bash
+which python        # Should point to your project's .venv
+python --version    # Should use expected Python
+which pip           # Should point to .venv
+
+4. Upgrade pip (recommended)
+bash
+python -m pip install --upgrade pip
+
+5. Install Packages
+bash
+pip install requests pytest flake8
+
+6. Save/Export the Environment (for reproducibility)
+bash
+pip freeze > requirements.txt
+
+7. Install from requirements.txt
+bash
+pip install -r requirements.txt
+
+8. Deactivate the Virtual Environment
+bash
+deactivate
+
+9. Remove/Reset the .venv
+bash
+rm -rf .venv    # Linux, macOS, WSL
+rmdir /S /Q .venv   # Windows (cmd)
+
+10. VS Code Integration
+Auto-detect .venv:
+
+VS Code finds .venv directory and offers to use it; accept prompt.
+
+Manually set interpreter (Command Palette):
+Cmd/Ctrl+Shift+P → Python: Select Interpreter → choose .venv/bin/python
+
+Per-project settings:
+This ensures VS Code uses .venv for linting/test/debug.
+
+Debug/Test/Lint/Run scripts:
+Always run terminal commands with the environment activated.
+
+11. Troubleshooting Tips
+Permissions error on activation (WSL or Linux):
+
+bash
+chmod +x .venv/bin/activate
+Fix “activate” not found:
+
+Recreate venv: python3 -m venv .venv
+
+Check for typos: .venv not just venv
+
+VS Code DOESN’T find .venv:
+
+Open terminal in project root
+
+Activate .venv manually BEFORE launching VS Code (recommended for WSL)
+
+Delete .vscode folder and reopen VS Code
+
+
+12. Clean Up Cache/Packages
+bash
+pip cache purge
+Result
+You’re now able to create, activate, manage, and clean up .venv environments natively or via VS Code, ensuring all dependencies are isolated, projects are reproducible, and your DevSecOps pipeline can leverage Python reliably.
+
+Technical Refresher
+.venv: Directory holding Python’s virtual environment for your project.
+
+Best Practice: One .venv per project, stored in project root (excluded from git!)
+
+VS Code: Looks for .venv and respects requirements.txt and .env files.
