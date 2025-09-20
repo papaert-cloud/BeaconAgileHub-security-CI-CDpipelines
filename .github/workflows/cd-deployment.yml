@@ -48,7 +48,7 @@ jobs:
       run: |
         curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
         grype ${{ inputs.container_image }} --fail-on high --output json --file scan-results.json
-        echo "passed=true" >> $GITHUB_OUTPUT
+        echo "passed=true" >> "${GITHUB_OUTPUT}"
 
   deploy-eks:
     name: 'Deploy to EKS'
@@ -120,13 +120,13 @@ jobs:
           - port: 80
             targetPort: 8080
         EOF
-        
+
         kubectl create namespace ${{ inputs.application_name }}-${{ inputs.environment }} --dry-run=client -o yaml | kubectl apply -f -
         kubectl apply -f deployment.yaml
         kubectl wait --for=condition=available deployment/${{ inputs.application_name }} -n ${{ inputs.application_name }}-${{ inputs.environment }} --timeout=300s
-        
-        echo "url=http://${{ inputs.application_name }}-${{ inputs.environment }}.local" >> $GITHUB_OUTPUT
-        echo "success=true" >> $GITHUB_OUTPUT
+
+        echo "url=http://${{ inputs.application_name }}-${{ inputs.environment }}.local" >> "${GITHUB_OUTPUT}"
+        echo "success=true" >> "${GITHUB_OUTPUT}"
 
   dast-testing:
     name: 'DAST Security Testing'
@@ -146,7 +146,7 @@ jobs:
         cmd_options: '-a -d -T 60'
     - name: Process Results
       run: |
-        echo "passed=true" >> $GITHUB_OUTPUT
+        echo "passed=true" >> "${GITHUB_OUTPUT}"
 
   deployment-summary:
     name: 'Deployment Summary'
@@ -162,11 +162,11 @@ jobs:
         PRE_VALIDATION="${{ needs.pre-deployment-validation.outputs.security_passed }}"
         EKS_DEPLOYMENT="${{ needs.deploy-eks.outputs.deployment_successful }}"
         DAST_PASSED="${{ needs.dast-testing.outputs.security_passed }}"
-        
+
         if [[ "$PRE_VALIDATION" == "true" && "$EKS_DEPLOYMENT" == "true" && "$DAST_PASSED" == "true" ]]; then
-          echo "success=true" >> $GITHUB_OUTPUT
+          echo "success=true" >> "${GITHUB_OUTPUT}"
           echo "✅ Deployment successful"
         else
-          echo "success=false" >> $GITHUB_OUTPUT
+          echo "success=false" >> "${GITHUB_OUTPUT}"
           echo "❌ Deployment failed"
         fi

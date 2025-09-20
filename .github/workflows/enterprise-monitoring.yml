@@ -32,9 +32,9 @@ jobs:
         id: determine-stack
         run: |
           case "${{ inputs.environment }}" in
-            production) echo "stack=full" >> $GITHUB_OUTPUT ;;
-            staging) echo "stack=standard" >> $GITHUB_OUTPUT ;;
-            *) echo "stack=basic" >> $GITHUB_OUTPUT ;;
+            production) echo "stack=full" >> "${GITHUB_OUTPUT}" ;;
+            staging) echo "stack=standard" >> "${GITHUB_OUTPUT}" ;;
+            *) echo "stack=basic" >> "${GITHUB_OUTPUT}" ;;
           esac
 
       - name: 🚨 Setup Alert Channels
@@ -44,7 +44,7 @@ jobs:
           if [[ "${{ inputs.environment }}" == "production" ]]; then
             CHANNELS="$CHANNELS,pagerduty,email"
           fi
-          echo "channels=$CHANNELS" >> $GITHUB_OUTPUT
+          echo "channels=$CHANNELS" >> "${GITHUB_OUTPUT}"
 
   infrastructure-monitoring:
     name: 🏗️ Infrastructure Monitoring
@@ -64,7 +64,7 @@ jobs:
           aws cloudwatch put-dashboard \
             --dashboard-name "Infrastructure-${{ inputs.environment }}" \
             --dashboard-body file://monitoring/dashboards/infrastructure.json
-          echo "✅ Infrastructure dashboard deployed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Infrastructure dashboard deployed" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: 🚨 Setup CloudWatch Alarms
         run: |
@@ -79,7 +79,7 @@ jobs:
             --threshold 80 \
             --comparison-operator GreaterThanThreshold \
             --evaluation-periods 2
-          
+
           # Memory Utilization Alarm
           aws cloudwatch put-metric-alarm \
             --alarm-name "HighMemoryUtilization-${{ inputs.environment }}" \
@@ -91,8 +91,8 @@ jobs:
             --threshold 85 \
             --comparison-operator GreaterThanThreshold \
             --evaluation-periods 2
-          
-          echo "✅ CloudWatch alarms configured" >> $GITHUB_STEP_SUMMARY
+
+          echo "✅ CloudWatch alarms configured" >> "${GITHUB_STEP_SUMMARY}"
 
   application-monitoring:
     name: 🚀 Application Monitoring
@@ -103,28 +103,28 @@ jobs:
 
       - name: 📊 Deploy Application Dashboards
         run: |
-          echo "📊 Deploying application monitoring dashboards..." >> $GITHUB_STEP_SUMMARY
-          
+          echo "📊 Deploying application monitoring dashboards..." >> "${GITHUB_STEP_SUMMARY}"
+
           # Deploy Grafana dashboards
           curl -X POST \
             -H "Content-Type: application/json" \
             -d @monitoring/dashboards/application.json \
             "http://grafana:3000/api/dashboards/db"
-          
-          echo "✅ Application dashboards deployed" >> $GITHUB_STEP_SUMMARY
+
+          echo "✅ Application dashboards deployed" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: 🔍 Setup Application Metrics
         run: |
-          echo "🔍 Configuring application metrics collection..." >> $GITHUB_STEP_SUMMARY
-          
+          echo "🔍 Configuring application metrics collection..." >> "${GITHUB_STEP_SUMMARY}"
+
           # Configure Prometheus scraping
           kubectl apply -f monitoring/prometheus/servicemonitor.yaml -n ${{ inputs.environment }}
-          
+
           # Setup custom metrics
-          echo "- Response time monitoring: ✅" >> $GITHUB_STEP_SUMMARY
-          echo "- Error rate tracking: ✅" >> $GITHUB_STEP_SUMMARY
-          echo "- Throughput monitoring: ✅" >> $GITHUB_STEP_SUMMARY
-          echo "- Business metrics: ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- Response time monitoring: ✅" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Error rate tracking: ✅" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Throughput monitoring: ✅" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Business metrics: ✅" >> "${GITHUB_STEP_SUMMARY}"
 
   security-monitoring:
     name: 🛡️ Security Monitoring
@@ -141,22 +141,22 @@ jobs:
 
       - name: 🛡️ Setup Security Hub Integration
         run: |
-          echo "🛡️ Configuring Security Hub monitoring..." >> $GITHUB_STEP_SUMMARY
-          
+          echo "🛡️ Configuring Security Hub monitoring..." >> "${GITHUB_STEP_SUMMARY}"
+
           # Enable Security Hub findings
           aws securityhub enable-security-hub
-          
+
           # Configure custom insights
           aws securityhub create-insight \
             --name "Critical-Findings-${{ inputs.environment }}" \
             --filters '{"SeverityLabel":[{"Value":"CRITICAL","Comparison":"EQUALS"}]}'
-          
-          echo "✅ Security monitoring configured" >> $GITHUB_STEP_SUMMARY
+
+          echo "✅ Security monitoring configured" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: 🚨 Setup Security Alerts
         run: |
-          echo "🚨 Configuring security alerting..." >> $GITHUB_STEP_SUMMARY
-          
+          echo "🚨 Configuring security alerting..." >> "${GITHUB_STEP_SUMMARY}"
+
           # GuardDuty findings alarm
           aws cloudwatch put-metric-alarm \
             --alarm-name "GuardDutyFindings-${{ inputs.environment }}" \
@@ -168,8 +168,8 @@ jobs:
             --threshold 1 \
             --comparison-operator GreaterThanOrEqualToThreshold \
             --evaluation-periods 1
-          
-          echo "✅ Security alerts configured" >> $GITHUB_STEP_SUMMARY
+
+          echo "✅ Security alerts configured" >> "${GITHUB_STEP_SUMMARY}"
 
   cost-monitoring:
     name: 💰 Cost Monitoring
@@ -186,17 +186,17 @@ jobs:
 
       - name: 💰 Setup Cost Budgets
         run: |
-          echo "💰 Configuring cost monitoring..." >> $GITHUB_STEP_SUMMARY
-          
+          echo "💰 Configuring cost monitoring..." >> "${GITHUB_STEP_SUMMARY}"
+
           # Create cost budget
           BUDGET_LIMIT=$(case "${{ inputs.environment }}" in
             production) echo "1000" ;;
             staging) echo "500" ;;
             *) echo "100" ;;
           esac)
-          
+
           aws budgets create-budget \
-            --account-id $(aws sts get-caller-identity --query Account --output text) \
+            --account-id "$(aws sts get-caller-identity --query Account --output text)" \
             --budget '{
               "BudgetName": "Monthly-Budget-${{ inputs.environment }}",
               "BudgetLimit": {
@@ -206,13 +206,13 @@ jobs:
               "TimeUnit": "MONTHLY",
               "BudgetType": "COST"
             }'
-          
-          echo "✅ Cost budget configured: \$$BUDGET_LIMIT/month" >> $GITHUB_STEP_SUMMARY
+
+          echo "✅ Cost budget configured: \$$BUDGET_LIMIT/month" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: 📊 Setup Cost Anomaly Detection
         run: |
-          echo "📊 Configuring cost anomaly detection..." >> $GITHUB_STEP_SUMMARY
-          
+          echo "📊 Configuring cost anomaly detection..." >> "${GITHUB_STEP_SUMMARY}"
+
           aws ce create-anomaly-detector \
             --anomaly-detector '{
               "DetectorName": "CostAnomalyDetector-${{ inputs.environment }}",
@@ -221,8 +221,8 @@ jobs:
               "MatchOptions": ["EQUALS"],
               "MonitorSpecification": "{\"DimensionKey\":\"SERVICE\",\"MatchOptions\":[\"EQUALS\"],\"Values\":[\"Amazon Elastic Compute Cloud - Compute\"]}"
             }'
-          
-          echo "✅ Cost anomaly detection enabled" >> $GITHUB_STEP_SUMMARY
+
+          echo "✅ Cost anomaly detection enabled" >> "${GITHUB_STEP_SUMMARY}"
 
   sla-monitoring:
     name: 📈 SLA/SLO Monitoring
@@ -233,8 +233,8 @@ jobs:
 
       - name: 📈 Configure SLO Monitoring
         run: |
-          echo "📈 Configuring SLA/SLO monitoring..." >> $GITHUB_STEP_SUMMARY
-          
+          echo "📈 Configuring SLA/SLO monitoring..." >> "${GITHUB_STEP_SUMMARY}"
+
           # Define SLOs based on environment
           case "${{ inputs.environment }}" in
             production)
@@ -253,16 +253,16 @@ jobs:
               ERROR_RATE_SLO="5.0"
               ;;
           esac
-          
-          echo "## 📈 SLO Targets" >> $GITHUB_STEP_SUMMARY
-          echo "- **Availability**: ${AVAILABILITY_SLO}%" >> $GITHUB_STEP_SUMMARY
-          echo "- **Latency**: <${LATENCY_SLO}ms" >> $GITHUB_STEP_SUMMARY
-          echo "- **Error Rate**: <${ERROR_RATE_SLO}%" >> $GITHUB_STEP_SUMMARY
+
+          echo "## 📈 SLO Targets" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Availability**: ${AVAILABILITY_SLO}%" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Latency**: <${LATENCY_SLO}ms" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Error Rate**: <${ERROR_RATE_SLO}%" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: 🎯 Setup SLO Alerts
         run: |
-          echo "🎯 Configuring SLO alerting..." >> $GITHUB_STEP_SUMMARY
-          
+          echo "🎯 Configuring SLO alerting..." >> "${GITHUB_STEP_SUMMARY}"
+
           # Create SLO burn rate alerts
           kubectl apply -f - <<EOF
           apiVersion: monitoring.coreos.com/v1
@@ -282,8 +282,8 @@ jobs:
                 annotations:
                   summary: "High error rate detected"
           EOF
-          
-          echo "✅ SLO alerts configured" >> $GITHUB_STEP_SUMMARY
+
+          echo "✅ SLO alerts configured" >> "${GITHUB_STEP_SUMMARY}"
 
   monitoring-validation:
     name: ✅ Monitoring Validation
@@ -299,28 +299,28 @@ jobs:
     steps:
       - name: ✅ Validate Monitoring Stack
         run: |
-          echo "✅ Validating monitoring configuration..." >> $GITHUB_STEP_SUMMARY
-          
+          echo "✅ Validating monitoring configuration..." >> "${GITHUB_STEP_SUMMARY}"
+
           # Simulate monitoring validation
-          echo "- Dashboard accessibility: ✅" >> $GITHUB_STEP_SUMMARY
-          echo "- Alert routing: ✅" >> $GITHUB_STEP_SUMMARY
-          echo "- Metric collection: ✅" >> $GITHUB_STEP_SUMMARY
-          echo "- Log aggregation: ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- Dashboard accessibility: ✅" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Alert routing: ✅" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Metric collection: ✅" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Log aggregation: ✅" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: 📊 Generate Monitoring Summary
         run: |
-          echo "# 📊 Enterprise Monitoring Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 🎯 Monitoring Configuration" >> $GITHUB_STEP_SUMMARY
-          echo "- **Environment**: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Stack**: ${{ needs.monitoring-setup.outputs.monitoring_stack }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Alert Channels**: ${{ needs.monitoring-setup.outputs.alert_channels }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 📋 Monitoring Components" >> $GITHUB_STEP_SUMMARY
-          echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Infrastructure | ${{ needs.infrastructure-monitoring.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Application | ${{ needs.application-monitoring.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Security | ${{ needs.security-monitoring.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Cost | ${{ needs.cost-monitoring.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| SLA/SLO | ${{ needs.sla-monitoring.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "# 📊 Enterprise Monitoring Summary" >> "${GITHUB_STEP_SUMMARY}"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "## 🎯 Monitoring Configuration" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Environment**: ${{ inputs.environment }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Stack**: ${{ needs.monitoring-setup.outputs.monitoring_stack }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Alert Channels**: ${{ needs.monitoring-setup.outputs.alert_channels }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "## 📋 Monitoring Components" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Component | Status |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "|-----------|--------|" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Infrastructure | ${{ needs.infrastructure-monitoring.result }} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Application | ${{ needs.application-monitoring.result }} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Security | ${{ needs.security-monitoring.result }} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Cost | ${{ needs.cost-monitoring.result }} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| SLA/SLO | ${{ needs.sla-monitoring.result }} |" >> "${GITHUB_STEP_SUMMARY}"

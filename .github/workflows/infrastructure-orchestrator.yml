@@ -54,9 +54,9 @@ jobs:
         run: |
           terragrunt plan -detailed-exitcode -out=tfplan
           if [ $? -eq 2 ]; then
-            echo "changes=true" >> $GITHUB_OUTPUT
+            echo "changes=true" >> "${GITHUB_OUTPUT}"
           else
-            echo "changes=false" >> $GITHUB_OUTPUT
+            echo "changes=false" >> "${GITHUB_OUTPUT}"
           fi
 
       - name: 💰 Cost Estimation
@@ -64,13 +64,15 @@ jobs:
         run: |
           # Simulate cost estimation
           ESTIMATED_COST=$((RANDOM % 500 + 50))
-          echo "estimate=$ESTIMATED_COST" >> $GITHUB_OUTPUT
-          echo "💰 Estimated monthly cost: \$$ESTIMATED_COST" >> $GITHUB_STEP_SUMMARY
+          echo "estimate=$ESTIMATED_COST" >> "${GITHUB_OUTPUT}"
+          echo "💰 Estimated monthly cost: \$$ESTIMATED_COST" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: 🚨 Cost Threshold Check
         run: |
-          if [ ${{ steps.cost.outputs.estimate }} -gt ${{ inputs.cost_threshold }} ]; then
-            echo "::error::Cost estimate (${{ steps.cost.outputs.estimate }}) exceeds threshold (${{ inputs.cost_threshold }})"
+          ESTIMATE="${{ steps.cost.outputs.estimate }}"
+          THRESHOLD="${{ inputs.cost_threshold }}"
+          if [ "$ESTIMATE" -gt "$THRESHOLD" ]; then
+            echo "::error::Cost estimate ($ESTIMATE) exceeds threshold ($THRESHOLD)"
             exit 1
           fi
 
@@ -99,13 +101,13 @@ jobs:
         working-directory: terragrunt/environments/${{ inputs.environment }}
         run: |
           terragrunt apply -auto-approve
-          echo "✅ Infrastructure deployed successfully" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Infrastructure deployed successfully" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: 🔍 Post-Deployment Validation
         run: |
-          echo "🔍 Running post-deployment validation..." >> $GITHUB_STEP_SUMMARY
+          echo "🔍 Running post-deployment validation..." >> "${GITHUB_STEP_SUMMARY}"
           # Add validation logic here
-          echo "✅ All infrastructure components healthy" >> $GITHUB_STEP_SUMMARY
+          echo "✅ All infrastructure components healthy" >> "${GITHUB_STEP_SUMMARY}"
 
   drift-detection:
     name: 🔄 Drift Detection
@@ -123,11 +125,11 @@ jobs:
 
       - name: 🔍 Detect Configuration Drift
         run: |
-          echo "🔍 Scanning for infrastructure drift..." >> $GITHUB_STEP_SUMMARY
+          echo "🔍 Scanning for infrastructure drift..." >> "${GITHUB_STEP_SUMMARY}"
           # Simulate drift detection
           if [ $((RANDOM % 10)) -eq 0 ]; then
-            echo "⚠️ Configuration drift detected" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ Configuration drift detected" >> "${GITHUB_STEP_SUMMARY}"
             echo "::warning::Infrastructure drift detected - review required"
           else
-            echo "✅ No configuration drift detected" >> $GITHUB_STEP_SUMMARY
+            echo "✅ No configuration drift detected" >> "${GITHUB_STEP_SUMMARY}"
           fi

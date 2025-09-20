@@ -26,29 +26,29 @@ jobs:
       id: env
       run: |
         if [[ "${{ github.event.workflow_run.head_branch }}" == "main" ]]; then
-          echo "environment=production" >> $GITHUB_OUTPUT
+          echo "environment=production" >> "${GITHUB_OUTPUT}"
         elif [[ "${{ github.event.workflow_run.head_branch }}" == "develop" ]]; then
-          echo "environment=staging" >> $GITHUB_OUTPUT
+          echo "environment=staging" >> "${GITHUB_OUTPUT}"
         else
-          echo "environment=dev" >> $GITHUB_OUTPUT
+          echo "environment=dev" >> "${GITHUB_OUTPUT}"
         fi
-    
+
     - name: Deployment Strategy
       id: strategy
       run: |
         ENV="${{ steps.env.outputs.environment }}"
         if [[ "$ENV" == "production" ]]; then
-          echo "deploy_to_eks=true" >> $GITHUB_OUTPUT
-          echo "deploy_to_ecs=true" >> $GITHUB_OUTPUT
+          echo "deploy_to_eks=true" >> "${GITHUB_OUTPUT}"
+          echo "deploy_to_ecs=true" >> "${GITHUB_OUTPUT}"
         else
-          echo "deploy_to_eks=true" >> $GITHUB_OUTPUT
-          echo "deploy_to_ecs=false" >> $GITHUB_OUTPUT
+          echo "deploy_to_eks=true" >> "${GITHUB_OUTPUT}"
+          echo "deploy_to_ecs=false" >> "${GITHUB_OUTPUT}"
         fi
-    
+
     - name: Container Image
       id: image
       run: |
-        echo "image=ghcr.io/${{ github.repository }}:${{ github.event.workflow_run.head_sha }}" >> $GITHUB_OUTPUT
+        echo "image=ghcr.io/${{ github.repository }}:${{ github.event.workflow_run.head_sha }}" >> "${GITHUB_OUTPUT}"
 
   deploy-application:
     name: 'Deploy Application'
