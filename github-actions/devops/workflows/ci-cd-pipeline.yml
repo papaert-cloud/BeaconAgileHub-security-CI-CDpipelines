@@ -1,5 +1,5 @@
 # DevOps Pipeline: Focus on Speed, Reliability, and Deployment Efficiency
-name: DevOps CI/CD Pipeline
+name: DevSecOps CI/CD Pipeline
 
 on:
   push:
