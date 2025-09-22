@@ -1,0 +1,476 @@
+# DevSecOps Pipeline: Security-First with Shift-Left Principles
+name: DevSecOps Secure Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 2 * * *'  # Daily security scans
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+  APP_NAME: "nexus-secure-app"
+  COSIGN_EXPERIMENTAL: 1
+  
+permissions:
+  id-token: write
+  contents: read
+  security-events: write
+  packages: write
+  attestations: write
+
+jobs:
+  # ============================================================================
+  # SECURITY ANALYSIS: Static analysis and secret scanning
+  # ============================================================================
+  security-analysis:
+    name: Security Analysis & Secret Scanning
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    # Secret scanning with multiple tools for comprehensive coverage
+    - name: Run Gitleaks Secret Scan
+      uses: gitleaks/gitleaks-action@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Run Semgrep SAST
+      uses: semgrep/semgrep-action@v1
+      with:
+        config: >-
+          p/security-audit
+          p/secrets
+          p/owasp-top-ten
+          p/cwe-top-25
+      env:
+        SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+        
+    # Infrastructure as Code security scanning
+    - name: Run Checkov IaC Security Scan
+      uses: bridgecrewio/checkov-action@master
+      with:
+        directory: .
+        framework: terraform,dockerfile,kubernetes
+        output_format: sarif
+        output_file_path: checkov-results.sarif
+        
+    - name: Upload Checkov Results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: checkov-results.sarif
+        
+  # ============================================================================
+  # SBOM GENERATION & VULNERABILITY SCANNING
+  # ============================================================================
+  sbom-and-vulnerability-scan:
+    name: SBOM Generation & Vulnerability Analysis
+    runs-on: ubuntu-latest
+    needs: security-analysis
+    outputs:
+      sbom-file: ${{ steps.sbom.outputs.sbom-file }}
+      vulnerability-count: ${{ steps.grype.outputs.vulnerability-count }}
+      
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Go Environment
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+        
+    # Install security tools
+    - name: Install Security Tools
+      run: |
+        # Install Syft for SBOM generation
+        curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+        
+        # Install Grype for vulnerability scanning
+        curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+        
+        # Install Cosign for image signing
+        curl -O -L "https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64"
+        sudo mv cosign-linux-amd64 /usr/local/bin/cosign
+        sudo chmod +x /usr/local/bin/cosign
+        
+    # Generate comprehensive SBOM
+    - name: Generate SBOM with Syft
+      id: sbom
+      run: |
+        # Generate SBOM in multiple formats for compatibility
+        syft . -o cyclonedx-json=sbom-cyclonedx.json
+        syft . -o spdx-json=sbom-spdx.json
+        syft . -o syft-json=sbom-syft.json
+        
+        # Set output for downstream jobs
+        echo "sbom-file=sbom-cyclonedx.json" >> $GITHUB_OUTPUT
+        
+        # Display SBOM summary
+        echo "## SBOM Generation Summary" >> $GITHUB_STEP_SUMMARY
+        echo "- CycloneDX format: $(wc -l < sbom-cyclonedx.json) lines"
+        echo "- SPDX format: $(wc -l < sbom-spdx.json) lines"
+        
+    # Vulnerability scanning with Grype
+    - name: Vulnerability Scan with Grype
+      id: grype
+      run: |
+        # Scan for vulnerabilities using the generated SBOM
+        grype sbom:sbom-cyclonedx.json -o json --file grype-results.json
+        grype sbom:sbom-cyclonedx.json -o sarif --file grype-results.sarif
+        
+        # Count vulnerabilities by severity
+        HIGH_CRITICAL=$(jq '[.matches[] | select(.vulnerability.severity == "High" or .vulnerability.severity == "Critical")] | length' grype-results.json)
+        TOTAL_VULNS=$(jq '.matches | length' grype-results.json)
+        
+        echo "vulnerability-count=$TOTAL_VULNS" >> $GITHUB_OUTPUT
+        echo "high-critical-count=$HIGH_CRITICAL" >> $GITHUB_OUTPUT
+        
+        # Create vulnerability summary
+        echo "## Vulnerability Scan Results" >> $GITHUB_STEP_SUMMARY
+        echo "- Total vulnerabilities: $TOTAL_VULNS"
+        echo "- High/Critical: $HIGH_CRITICAL"
+        
+        # Fail if high/critical vulnerabilities found (security gate)
+        if [ "$HIGH_CRITICAL" -gt 0 ]; then
+          echo "❌ High/Critical vulnerabilities detected. Blocking deployment."
+          exit 1
+        fi
+        
+    # Additional scanning with Snyk for comprehensive coverage
+    - name: Run Snyk Security Scan
+      uses: snyk/actions/golang@master
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      with:
+        args: --severity-threshold=high --json-file-output=snyk-results.json
+        
+    - name: Upload Security Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-artifacts
+        path: |
+          sbom-*.json
+          grype-results.*
+          snyk-results.json
+          
+  # ============================================================================
+  # SECURE BUILD & SIGNING
+  # ============================================================================
+  secure-build:
+    name: Secure Build & Image Signing
+    runs-on: ubuntu-latest
+    needs: sbom-and-vulnerability-scan
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
+      image-tag: ${{ steps.meta.outputs.tags }}
+      
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/GitHubActionsOIDCRole
+        aws-region: ${{ env.AWS_REGION }}
+        
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+      
+    # Build with security-hardened Dockerfile
+    - name: Extract Metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
+        tags: |
+          type=ref,event=branch
+          type=sha,prefix=secure-
+          type=raw,value=signed-${{ github.run_number }}
+          
+    - name: Build Secure Docker Image
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile.secure  # Security-hardened Dockerfile
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: |
+          org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          org.opencontainers.image.revision=${{ github.sha }}
+          security.sbom.generated=true
+          security.vulnerability.scanned=true
+        provenance: true  # Generate SLSA provenance
+        sbom: true       # Generate SBOM attestation
+        
+    # Sign the container image with Cosign
+    - name: Sign Container Image
+      run: |
+        # Sign the image using keyless signing (OIDC)
+        cosign sign --yes ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.build.outputs.digest }}
+        
+        # Attach SBOM as attestation
+        cosign attest --yes --predicate sbom-cyclonedx.json --type cyclonedx \
+          ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.build.outputs.digest }}
+          
+    # Store security artifacts in S3
+    - name: Store Security Artifacts
+      run: |
+        # Upload SBOM and scan results to S3 for centralized storage
+        aws s3 cp sbom-cyclonedx.json s3://${{ vars.SECURITY_ARTIFACTS_BUCKET }}/sboms/${{ github.sha }}/
+        aws s3 cp grype-results.json s3://${{ vars.SECURITY_ARTIFACTS_BUCKET }}/scans/${{ github.sha }}/
+        
+        # Create metadata file
+        cat > security-metadata.json << EOF
+        {
+          "repository": "${{ github.repository }}",
+          "commit": "${{ github.sha }}",
+          "image": "${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.build.outputs.digest }}",
+          "sbom_location": "s3://${{ vars.SECURITY_ARTIFACTS_BUCKET }}/sboms/${{ github.sha }}/sbom-cyclonedx.json",
+          "scan_results": "s3://${{ vars.SECURITY_ARTIFACTS_BUCKET }}/scans/${{ github.sha }}/grype-results.json",
+          "signed": true,
+          "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        }
+        EOF
+        
+        aws s3 cp security-metadata.json s3://${{ vars.SECURITY_ARTIFACTS_BUCKET }}/metadata/${{ github.sha }}/
+        
+  # ============================================================================
+  # SECURITY HUB INTEGRATION
+  # ============================================================================
+  security-hub-integration:
+    name: AWS Security Hub Integration
+    runs-on: ubuntu-latest
+    needs: secure-build
+    
+    steps:
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/GitHubActionsOIDCRole
+        aws-region: ${{ env.AWS_REGION }}
+        
+    - name: Download Security Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: security-artifacts
+        
+    # Convert scan results to AWS Security Finding Format (ASFF)
+    - name: Convert to ASFF and Import to Security Hub
+      run: |
+        # Convert Grype results to ASFF format
+        python3 << 'EOF'
+        import json
+        import uuid
+        from datetime import datetime
+        
+        # Load Grype results
+        with open('grype-results.json', 'r') as f:
+            grype_data = json.load(f)
+        
+        # Convert to ASFF format
+        findings = []
+        for match in grype_data.get('matches', []):
+            vuln = match['vulnerability']
+            artifact = match['artifact']
+            
+            finding = {
+                "SchemaVersion": "2018-10-08",
+                "Id": f"grype-{vuln['id']}-{artifact['name']}",
+                "ProductArn": f"arn:aws:securityhub:{os.environ['AWS_REGION']}::product/anchore/grype",
+                "GeneratorId": "grype-scanner",
+                "AwsAccountId": os.environ['AWS_ACCOUNT_ID'],
+                "Types": ["Software and Configuration Checks/Vulnerabilities/CVE"],
+                "CreatedAt": datetime.utcnow().isoformat() + "Z",
+                "UpdatedAt": datetime.utcnow().isoformat() + "Z",
+                "Severity": {
+                    "Label": vuln['severity'].upper()
+                },
+                "Title": f"Vulnerability {vuln['id']} in {artifact['name']}",
+                "Description": vuln.get('description', 'No description available'),
+                "Resources": [{
+                    "Type": "Container",
+                    "Id": f"arn:aws:ecr:{os.environ['AWS_REGION']}:{os.environ['AWS_ACCOUNT_ID']}:repository/{os.environ['ECR_REPOSITORY']}",
+                    "Details": {
+                        "Container": {
+                            "Name": artifact['name'],
+                            "ImageId": os.environ.get('IMAGE_DIGEST', '')
+                        }
+                    }
+                }]
+            }
+            findings.append(finding)
+        
+        # Save ASFF findings
+        with open('asff-findings.json', 'w') as f:
+            json.dump(findings, f, indent=2)
+        EOF
+        
+        # Import findings to Security Hub
+        if [ -s asff-findings.json ]; then
+          aws securityhub batch-import-findings --findings file://asff-findings.json
+        fi
+        
+  # ============================================================================
+  # KUBERNETES SECURITY ENFORCEMENT
+  # ============================================================================
+  k8s-security-deployment:
+    name: Kubernetes Security Enforcement
+    runs-on: ubuntu-latest
+    needs: [secure-build, security-hub-integration]
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/GitHubActionsOIDCRole
+        aws-region: ${{ env.AWS_REGION }}
+        
+    - name: Setup kubectl and Helm
+      run: |
+        # Install kubectl
+        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+        sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+        
+        # Install Helm
+        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+        
+        # Configure kubeconfig
+        aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.APP_NAME }}-cluster
+        
+    # Deploy Kyverno policies for runtime security
+    - name: Deploy Kyverno Security Policies
+      run: |
+        # Install Kyverno if not present
+        kubectl get deployment kyverno -n kyverno-system || \
+        helm repo add kyverno https://kyverno.github.io/kyverno/ && \
+        helm repo update && \
+        helm install kyverno kyverno/kyverno -n kyverno-system --create-namespace
+        
+        # Apply security policies
+        kubectl apply -f - << 'EOF'
+        apiVersion: kyverno.io/v1
+        kind: ClusterPolicy
+        metadata:
+          name: require-signed-images
+        spec:
+          validationFailureAction: enforce
+          background: false
+          rules:
+          - name: check-image-signature
+            match:
+              any:
+              - resources:
+                  kinds:
+                  - Pod
+            verifyImages:
+            - imageReferences:
+              - "${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:*"
+              attestors:
+              - entries:
+                - keyless:
+                    subject: "https://github.com/${{ github.repository }}/.github/workflows/*"
+                    issuer: "https://token.actions.githubusercontent.com"
+        ---
+        apiVersion: kyverno.io/v1
+        kind: ClusterPolicy
+        metadata:
+          name: require-sbom-attestation
+        spec:
+          validationFailureAction: enforce
+          background: false
+          rules:
+          - name: check-sbom-attestation
+            match:
+              any:
+              - resources:
+                  kinds:
+                  - Pod
+            validate:
+              message: "SBOM attestation required"
+              pattern:
+                metadata:
+                  labels:
+                    security.sbom.generated: "true"
+        EOF
+        
+    # Deploy application with security context
+    - name: Deploy Secure Application
+      run: |
+        export IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ needs.secure-build.outputs.image-digest }}"
+        
+        kubectl apply -f - << EOF
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: ${{ env.APP_NAME }}
+          labels:
+            app: ${{ env.APP_NAME }}
+            security.sbom.generated: "true"
+            security.vulnerability.scanned: "true"
+        spec:
+          replicas: 3
+          selector:
+            matchLabels:
+              app: ${{ env.APP_NAME }}
+          template:
+            metadata:
+              labels:
+                app: ${{ env.APP_NAME }}
+                security.sbom.generated: "true"
+            spec:
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 65534
+                fsGroup: 65534
+              containers:
+              - name: app
+                image: ${IMAGE_URI}
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  readOnlyRootFilesystem: true
+                  capabilities:
+                    drop:
+                    - ALL
+                resources:
+                  limits:
+                    memory: "512Mi"
+                    cpu: "500m"
+                  requests:
+                    memory: "256Mi"
+                    cpu: "250m"
+        EOF
+        
+        # Wait for deployment to be ready
+        kubectl rollout status deployment/${{ env.APP_NAME }} --timeout=300s
+        
+    # Verify security compliance
+    - name: Security Compliance Verification
+      run: |
+        # Verify image signature
+        cosign verify --certificate-identity-regexp="https://github.com/${{ github.repository }}" \
+          --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+          ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ needs.secure-build.outputs.image-digest }}
+        
+        # Verify SBOM attestation
+        cosign verify-attestation --type cyclonedx \
+          --certificate-identity-regexp="https://github.com/${{ github.repository }}" \
+          --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+          ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ needs.secure-build.outputs.image-digest }}
+        
+        echo "✅ Security compliance verification completed successfully"

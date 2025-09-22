@@ -1,0 +1,475 @@
+# Comprehensive Kyverno Security Policies for Runtime Enforcement
+# These policies enforce security best practices at the Kubernetes runtime level
+
+---
+# Policy 1: Require Signed Container Images
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-signed-images
+  annotations:
+    policies.kyverno.io/title: Require Signed Container Images
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      This policy ensures all container images are cryptographically signed
+      using Cosign with keyless signing (OIDC). This prevents deployment of
+      unsigned or tampered container images, supporting SLSA Level 2+ compliance.
+spec:
+  validationFailureAction: enforce
+  background: false
+  failurePolicy: Fail
+  rules:
+  - name: verify-image-signature
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+          namespaces:
+          - production
+          - staging
+    verifyImages:
+    - imageReferences:
+      - "*"
+      attestors:
+      - entries:
+        - keyless:
+            subject: "https://github.com/{{GITHUB_REPOSITORY}}/.github/workflows/*"
+            issuer: "https://token.actions.githubusercontent.com"
+            additionalExtensions:
+              github_workflow_trigger: "push"
+              github_workflow_sha: "{{GITHUB_SHA}}"
+
+---
+# Policy 2: Require SBOM Attestation
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-sbom-attestation
+  annotations:
+    policies.kyverno.io/title: Require SBOM Attestation
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      This policy requires all container images to have SBOM (Software Bill of Materials)
+      attestations. This ensures complete visibility into software components and
+      supports vulnerability tracking and compliance requirements.
+spec:
+  validationFailureAction: enforce
+  background: false
+  failurePolicy: Fail
+  rules:
+  - name: check-sbom-attestation
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+          namespaces:
+          - production
+          - staging
+    verifyImages:
+    - imageReferences:
+      - "*"
+      attestations:
+      - predicateType: "https://cyclonedx.org/bom"
+        attestors:
+        - entries:
+          - keyless:
+              subject: "https://github.com/{{GITHUB_REPOSITORY}}/.github/workflows/*"
+              issuer: "https://token.actions.githubusercontent.com"
+
+---
+# Policy 3: Enforce Security Context Standards
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: enforce-security-context
+  annotations:
+    policies.kyverno.io/title: Enforce Security Context Standards
+    policies.kyverno.io/category: Pod Security Standards
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      This policy enforces Pod Security Standards by requiring secure security contexts.
+      It prevents privilege escalation, requires non-root users, and enforces
+      read-only root filesystems where possible.
+spec:
+  validationFailureAction: enforce
+  background: true
+  rules:
+  - name: check-security-context
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+    validate:
+      message: "Security context must be properly configured"
+      pattern:
+        spec:
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: ">0"
+            fsGroup: ">0"
+          containers:
+          - name: "*"
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              runAsNonRoot: true
+              capabilities:
+                drop:
+                - ALL
+
+---
+# Policy 4: Require Resource Limits
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-resource-limits
+  annotations:
+    policies.kyverno.io/title: Require Resource Limits
+    policies.kyverno.io/category: Resource Management
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      This policy requires all containers to have CPU and memory limits defined.
+      This prevents resource exhaustion attacks and ensures fair resource allocation.
+spec:
+  validationFailureAction: enforce
+  background: true
+  rules:
+  - name: check-resource-limits
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+    validate:
+      message: "Resource limits are required for all containers"
+      pattern:
+        spec:
+          containers:
+          - name: "*"
+            resources:
+              limits:
+                memory: "?*"
+                cpu: "?*"
+              requests:
+                memory: "?*"
+                cpu: "?*"
+
+---
+# Policy 5: Disallow Privileged Containers
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-privileged-containers
+  annotations:
+    policies.kyverno.io/title: Disallow Privileged Containers
+    policies.kyverno.io/category: Pod Security Standards
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      This policy prevents the creation of privileged containers which have
+      access to all Linux kernel capabilities and can bypass security mechanisms.
+spec:
+  validationFailureAction: enforce
+  background: true
+  rules:
+  - name: check-privileged
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+    validate:
+      message: "Privileged containers are not allowed"
+      pattern:
+        spec:
+          =(securityContext):
+            =(privileged): "false"
+          containers:
+          - name: "*"
+            =(securityContext):
+              =(privileged): "false"
+
+---
+# Policy 6: Require Network Policies
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-network-policies
+  annotations:
+    policies.kyverno.io/title: Require Network Policies
+    policies.kyverno.io/category: Network Security
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Namespace
+    policies.kyverno.io/description: >-
+      This policy ensures that every namespace has appropriate NetworkPolicies
+      to control ingress and egress traffic, implementing network segmentation.
+spec:
+  validationFailureAction: enforce
+  background: false
+  rules:
+  - name: check-network-policy
+    match:
+      any:
+      - resources:
+          kinds:
+          - Namespace
+    exclude:
+      any:
+      - resources:
+          namespaces:
+          - kube-system
+          - kube-public
+          - kyverno-system
+    generate:
+      kind: NetworkPolicy
+      apiVersion: networking.k8s.io/v1
+      name: default-deny-all
+      namespace: "{{request.object.metadata.name}}"
+      data:
+        spec:
+          podSelector: {}
+          policyTypes:
+          - Ingress
+          - Egress
+
+---
+# Policy 7: Enforce Image Vulnerability Scanning
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: enforce-vulnerability-scanning
+  annotations:
+    policies.kyverno.io/title: Enforce Image Vulnerability Scanning
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      This policy ensures that container images have been scanned for vulnerabilities
+      and meet security thresholds before deployment. Images must have labels
+      indicating successful vulnerability scanning.
+spec:
+  validationFailureAction: enforce
+  background: false
+  rules:
+  - name: check-vulnerability-scan-labels
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+          namespaces:
+          - production
+          - staging
+    validate:
+      message: "Container images must be vulnerability scanned and approved"
+      pattern:
+        metadata:
+          labels:
+            security.vulnerability.scanned: "true"
+            security.vulnerability.approved: "true"
+
+---
+# Policy 8: Require Service Mesh Sidecar
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-service-mesh-sidecar
+  annotations:
+    policies.kyverno.io/title: Require Service Mesh Sidecar
+    policies.kyverno.io/category: Network Security
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      This policy ensures that all application pods in production namespaces
+      have service mesh sidecar injection enabled for mTLS and traffic management.
+spec:
+  validationFailureAction: enforce
+  background: false
+  rules:
+  - name: check-sidecar-injection
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+          namespaces:
+          - production
+    exclude:
+      any:
+      - resources:
+          kinds:
+          - Pod
+          names:
+          - "*-system-*"
+    validate:
+      message: "Service mesh sidecar injection is required in production"
+      pattern:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "true"
+
+---
+# Policy 9: Enforce Secret Management
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: enforce-secret-management
+  annotations:
+    policies.kyverno.io/title: Enforce Secret Management
+    policies.kyverno.io/category: Secret Management
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      This policy prevents hardcoded secrets in container environment variables
+      and requires the use of Kubernetes Secrets or external secret management systems.
+spec:
+  validationFailureAction: enforce
+  background: true
+  rules:
+  - name: check-hardcoded-secrets
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+    validate:
+      message: "Hardcoded secrets in environment variables are not allowed"
+      deny:
+        conditions:
+        - key: "{{ request.object.spec.containers[?contains(env[?contains(name, 'PASSWORD') || contains(name, 'SECRET') || contains(name, 'TOKEN') || contains(name, 'KEY')].value, '*')] }}"
+          operator: AnyIn
+          value: ["*"]
+
+---
+# Policy 10: Require Pod Disruption Budgets
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-pod-disruption-budget
+  annotations:
+    policies.kyverno.io/title: Require Pod Disruption Budget
+    policies.kyverno.io/category: Availability
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Deployment
+    policies.kyverno.io/description: >-
+      This policy ensures that all Deployments with multiple replicas have
+      corresponding PodDisruptionBudgets to maintain availability during updates.
+spec:
+  validationFailureAction: enforce
+  background: false
+  rules:
+  - name: check-pdb-exists
+    match:
+      any:
+      - resources:
+          kinds:
+          - Deployment
+    preconditions:
+      all:
+      - key: "{{ request.object.spec.replicas }}"
+        operator: GreaterThan
+        value: 1
+    generate:
+      kind: PodDisruptionBudget
+      apiVersion: policy/v1
+      name: "{{ request.object.metadata.name }}-pdb"
+      namespace: "{{ request.object.metadata.namespace }}"
+      data:
+        spec:
+          minAvailable: 1
+          selector:
+            matchLabels:
+              app: "{{ request.object.metadata.name }}"
+
+---
+# Policy 11: Enforce Image Registry Allowlist
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: enforce-registry-allowlist
+  annotations:
+    policies.kyverno.io/title: Enforce Image Registry Allowlist
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      This policy restricts container images to approved registries only,
+      preventing the use of untrusted or public registries in production environments.
+spec:
+  validationFailureAction: enforce
+  background: true
+  rules:
+  - name: check-registry-allowlist
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+          namespaces:
+          - production
+    validate:
+      message: "Images must be from approved registries"
+      pattern:
+        spec:
+          containers:
+          - name: "*"
+            image: "{{AWS_ACCOUNT_ID}}.dkr.ecr.{{AWS_REGION}}.amazonaws.com/*"
+
+---
+# Policy 12: Require Security Labels
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-security-labels
+  annotations:
+    policies.kyverno.io/title: Require Security Labels
+    policies.kyverno.io/category: Compliance
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      This policy requires specific security-related labels on all pods
+      to enable proper security monitoring and compliance tracking.
+spec:
+  validationFailureAction: enforce
+  background: true
+  rules:
+  - name: check-security-labels
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+    validate:
+      message: "Required security labels are missing"
+      pattern:
+        metadata:
+          labels:
+            security.compliance.framework: "?*"
+            security.scan.timestamp: "?*"
+            security.policy.version: "?*"
+
+---
+# ClusterPolicyReport for monitoring policy violations
+apiVersion: kyverno.io/v1alpha2
+kind: ClusterPolicyReport
+metadata:
+  name: security-policy-violations
+  labels:
+    app.kubernetes.io/managed-by: kyverno
+spec:
+  results: []
+  summary:
+    pass: 0
+    fail: 0
+    warn: 0
+    error: 0
+    skip: 0

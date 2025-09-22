@@ -1,19 +1,83 @@
-# GitHub Actions - Super Workflows
+# GitHub Actions DevOps & DevSecOps Solutions
 
-This folder contains five high-impact, end-to-end CI/CD and DevSecOps pipeline templates you can adapt for real projects.
+## Architecture Overview
 
-Structure:
-- devops/
-  - solution-01-ci-build-deploy/  # Standard CI/CD: build, test, push
-  - solution-02-infra-approval/   # Terraform plan-as-artifact + gated apply (OIDC)
-- devsecops/
-  - solution-03-sbom-sca/         # SBOM generation (Syft) + SCA (Grype/Snyk) + gates
-  - solution-04-image-signing-kyverno/ # cosign signing, ECR, Kyverno admission enforcement
-  - solution-05-security-platform/ # Centralized findings, Security Hub (ASFF), S3 artifacts
+This directory contains two comprehensive pipeline solutions:
 
-Region: us-east-1
-Accounts (examples provided): 005965605891, 058264377640 (OU: ou-im88-1fmr1yt9)
+### 1. DevOps Pipeline (`devops/`)
+- **Focus**: Speed, reliability, deployment efficiency
+- **Key Features**: Automated testing, infrastructure provisioning, blue/green deployments
+- **Tools**: Terraform, Docker, AWS services, performance monitoring
 
-All templates use GitHub OIDC (no long-lived AWS keys), least-privilege IAM patterns, and encrypted S3 for artifacts.
+### 2. DevSecOps Pipeline (`devsecops/`)
+- **Focus**: Security-first approach with shift-left principles
+- **Key Features**: SBOM generation, vulnerability scanning, supply chain security
+- **Tools**: Syft, Grype, Snyk, Cosign, Kyverno, Security Hub integration
 
-Follow each solution's README for runbooks, commands, and implementation details.
+## Directory Structure
+
+```
+github-actions/
+├── devops/
+│   ├── workflows/
+│   ├── scripts/
+│   ├── terraform/
+│   └── docs/
+├── devsecops/
+│   ├── workflows/
+│   ├── scripts/
+│   ├── security-policies/
+│   ├── compliance/
+│   └── docs/
+└── shared/
+    ├── scripts/
+    └── configs/
+```
+
+## Prerequisites
+
+### Required Tools
+- AWS CLI v2+
+- Terraform >= 1.5
+- Docker >= 20.10
+- kubectl >= 1.25
+- Go >= 1.19 (for custom tooling)
+
+### AWS Services Setup
+- IAM roles with OIDC provider
+- S3 buckets for artifacts
+- ECR repositories
+- Security Hub enabled
+- KMS keys for signing
+
+## Quick Start
+
+1. **Setup AWS OIDC Provider**:
+   ```bash
+   cd terraform/oidc-setup
+   terraform init && terraform apply
+   ```
+
+2. **Configure Repository Secrets**:
+   - `AWS_ACCOUNT_ID`
+   - `AWS_REGION`
+   - `ECR_REPOSITORY`
+
+3. **Choose Your Pipeline**:
+   - DevOps: Copy workflows from `devops/workflows/`
+   - DevSecOps: Copy workflows from `devsecops/workflows/`
+
+## Security Considerations
+
+- All pipelines use OIDC authentication (no static keys)
+- Least privilege IAM policies
+- Encrypted artifact storage
+- Signed container images
+- Vulnerability gates prevent insecure deployments
+
+## Compliance Mapping
+
+- **NIST SSDF**: Supply chain security practices
+- **SLSA**: Build integrity and provenance
+- **CIS Benchmarks**: Infrastructure hardening
+- **OWASP**: Application security best practices
