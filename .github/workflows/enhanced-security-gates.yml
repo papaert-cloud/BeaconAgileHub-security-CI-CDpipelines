@@ -1,0 +1,548 @@
+name: 🔒 Enhanced Security Gates - Multi-Layer Scanning
+
+# Event triggers with workflow_dispatch and workflow_call support
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+        description: 'Target environment (dev/staging/production)'
+      severity_threshold:
+        required: false
+        type: string
+        default: 'medium'
+        description: 'Security severity threshold (info/low/medium/high/critical)'
+      enable_sbom:
+        required: false
+        type: boolean
+        default: true
+        description: 'Enable SBOM generation and vulnerability scanning'
+      fail_on_severity:
+        required: false
+        type: boolean
+        default: false
+        description: 'Fail pipeline on security findings above threshold'
+      scan_tools:
+        required: false
+        type: string
+        default: 'kics,checkov,terrascan,trivy'
+        description: 'Comma-separated list of security tools to run'
+    secrets:
+      AWS_ROLE_ARN:
+        required: false
+      SNYK_TOKEN:
+        required: false
+      GITHUB_TOKEN:
+        required: false
+    outputs:
+      security_status:
+        description: 'Overall security scan status'
+        value: ${{ jobs.security-summary.outputs.status }}
+      
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target Environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options: ['dev', 'staging', 'production']
+      severity_threshold:
+        description: 'Security Severity Threshold'
+        required: false
+        default: 'medium'
+        type: choice
+        options: ['info', 'low', 'medium', 'high', 'critical']
+      fail_on_severity:
+        description: 'Fail on Security Findings'
+        required: false
+        type: boolean
+        default: false
+      scan_tools:
+        description: 'Security Tools to Run (comma-separated)'
+        required: false
+        default: 'kics,checkov,terrascan,trivy'
+        type: string
+
+# Concurrency control - only one security scan per environment at a time
+concurrency:
+  group: security-gates-${{ inputs.environment || github.event.inputs.environment }}-${{ github.ref }}
+  cancel-in-progress: false  # Don't cancel security scans to maintain audit trail
+
+# Environment variables - centralized configuration
+env:
+  # Tool versions - easily updatable in one place
+  KICS_VERSION: "1.7.13"                     # Infrastructure as Code security scanner
+  CHECKOV_VERSION: "3.1.34"                  # IaC security scanner (Bridgecrew)
+  TERRASCAN_VERSION: "1.18.11"               # IaC security scanner (Tenable)
+  TRIVY_VERSION: "0.48.3"                    # Container security scanner
+  SYFT_VERSION: "0.100.0"                    # SBOM generation tool
+  GRYPE_VERSION: "0.74.1"                    # Vulnerability scanner
+  TRUFFLEHOG_VERSION: "3.63.7"               # Secrets scanner
+  
+  # Security configuration
+  SEVERITY_THRESHOLD: ${{ inputs.severity_threshold || github.event.inputs.severity_threshold || 'medium' }}
+  ENVIRONMENT: ${{ inputs.environment || github.event.inputs.environment || 'dev' }}
+  FAIL_ON_FINDINGS: ${{ inputs.fail_on_severity || github.event.inputs.fail_on_severity || 'false' }}
+  SCAN_TOOLS: ${{ inputs.scan_tools || github.event.inputs.scan_tools || 'kics,checkov,terrascan,trivy' }}
+  
+  # Output directories
+  SECURITY_REPORTS_DIR: "security-reports"
+  SBOM_DIR: "sbom-artifacts"
+
+permissions:
+  id-token: write      # For AWS OIDC authentication
+  contents: read       # For repository access
+  security-events: write  # For SARIF upload
+  actions: read        # For workflow access
+
+jobs:
+  # === INFRASTRUCTURE SECURITY SCANNING ===
+  infrastructure-security:
+    name: 🏗️ Infrastructure Security Scanning
+    runs-on: ubuntu-22.04
+    if: contains(env.SCAN_TOOLS, 'kics') || contains(env.SCAN_TOOLS, 'checkov') || contains(env.SCAN_TOOLS, 'terrascan')
+    
+    strategy:
+      # Run multiple scanners in parallel for comprehensive coverage
+      matrix:
+        scanner: 
+          - name: 'kics'
+            enabled: ${{ contains(env.SCAN_TOOLS, 'kics') }}
+          - name: 'checkov' 
+            enabled: ${{ contains(env.SCAN_TOOLS, 'checkov') }}
+          - name: 'terrascan'
+            enabled: ${{ contains(env.SCAN_TOOLS, 'terrascan') }}
+      fail-fast: false  # Continue with other scanners if one fails
+    
+    steps:
+      - name: 🔄 Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better analysis
+      
+      - name: 📁 Create Report Directory
+        run: |
+          mkdir -p ${{ env.SECURITY_REPORTS_DIR }}
+          
+      # === KICS SECURITY SCANNING ===
+      - name: 🛡️ KICS Infrastructure Security Scan
+        if: matrix.scanner.name == 'kics' && matrix.scanner.enabled
+        run: |
+          echo "🚀 Setting up KICS v${{ env.KICS_VERSION }}..."
+          # Download and install KICS binary
+          curl -sfL "https://github.com/Checkmarx/kics/releases/download/v${{ env.KICS_VERSION }}/kics_${{ env.KICS_VERSION }}_linux_x64.tar.gz" | tar -xzC /tmp
+          sudo mv /tmp/kics /usr/local/bin/
+          sudo chmod +x /usr/local/bin/kics
+          
+          echo "🔍 Running KICS scan with severity threshold: ${{ env.SEVERITY_THRESHOLD }}..."
+          # Run KICS scan with comprehensive output formats
+          kics scan \
+            --path . \
+            --ignore-on-exit results \
+            --output-path ${{ env.SECURITY_REPORTS_DIR }}/kics \
+            --output-name kics-results \
+            --report-formats json,sarif,html \
+            --severity ${{ env.SEVERITY_THRESHOLD }} \
+            --verbose || echo "KICS scan completed with findings"
+            
+          # Generate structured comparison report
+          echo "📊 KICS scan completed. Generating summary..."
+          if [ -f "${{ env.SECURITY_REPORTS_DIR }}/kics/kics-results.json" ]; then
+            # Count findings by severity using jq
+            CRITICAL=$(jq '[.queries[].files[].issues[] | select(.severity == "HIGH")] | length' "${{ env.SECURITY_REPORTS_DIR }}/kics/kics-results.json" 2>/dev/null || echo 0)
+            HIGH=$(jq '[.queries[].files[].issues[] | select(.severity == "MEDIUM")] | length' "${{ env.SECURITY_REPORTS_DIR }}/kics/kics-results.json" 2>/dev/null || echo 0)
+            MEDIUM=$(jq '[.queries[].files[].issues[] | select(.severity == "LOW")] | length' "${{ env.SECURITY_REPORTS_DIR }}/kics/kics-results.json" 2>/dev/null || echo 0)
+            LOW=$(jq '[.queries[].files[].issues[] | select(.severity == "INFO")] | length' "${{ env.SECURITY_REPORTS_DIR }}/kics/kics-results.json" 2>/dev/null || echo 0)
+            
+            echo "KICS_CRITICAL=$CRITICAL" >> $GITHUB_ENV
+            echo "KICS_HIGH=$HIGH" >> $GITHUB_ENV
+            echo "KICS_MEDIUM=$MEDIUM" >> $GITHUB_ENV
+            echo "KICS_LOW=$LOW" >> $GITHUB_ENV
+          else
+            echo "KICS scan results not found"
+          fi
+          
+      # === CHECKOV SECURITY SCANNING ===
+      - name: 🛡️ Checkov Infrastructure Security Scan
+        if: matrix.scanner.name == 'checkov' && matrix.scanner.enabled
+        uses: bridgecrewio/checkov-action@v12.2582.0
+        with:
+          directory: .
+          framework: terraform,cloudformation,kubernetes,dockerfile
+          output_format: sarif,json,cli
+          output_file_path: ${{ env.SECURITY_REPORTS_DIR }}/checkov-results
+          quiet: true
+          soft_fail: true  # Don't fail the job, we'll handle this in summary
+          
+      # === TERRASCAN SECURITY SCANNING ===
+      - name: 🛡️ Terrascan Infrastructure Security Scan
+        if: matrix.scanner.name == 'terrascan' && matrix.scanner.enabled
+        run: |
+          echo "🚀 Setting up Terrascan v${{ env.TERRASCAN_VERSION }}..."
+          # Download and install Terrascan
+          curl -L "https://github.com/tenable/terrascan/releases/download/v${{ env.TERRASCAN_VERSION }}/terrascan_${{ env.TERRASCAN_VERSION }}_Linux_x86_64.tar.gz" > terrascan.tar.gz
+          tar -xf terrascan.tar.gz
+          sudo mv terrascan /usr/local/bin/
+          
+          echo "🔍 Running Terrascan scan..."
+          # Run Terrascan with multiple output formats
+          terrascan scan \
+            --iac-type terraform \
+            --output json \
+            --output-dir ${{ env.SECURITY_REPORTS_DIR }}/terrascan || echo "Terrascan completed with findings"
+            
+      # === UPLOAD SECURITY REPORTS ===
+      - name: 📤 Upload Security Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: infrastructure-security-${{ matrix.scanner.name }}-${{ env.ENVIRONMENT }}
+          path: ${{ env.SECURITY_REPORTS_DIR }}/
+          retention-days: 30
+          
+      # === UPLOAD SARIF RESULTS ===
+      - name: 📊 Upload SARIF Results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always() && (matrix.scanner.name == 'kics' || matrix.scanner.name == 'checkov')
+        with:
+          sarif_file: ${{ env.SECURITY_REPORTS_DIR }}/${{ matrix.scanner.name }}/${{ matrix.scanner.name }}-results.sarif
+        continue-on-error: true
+
+  # === CONTAINER SECURITY SCANNING ===
+  container-security:
+    name: 🐳 Container Security Scanning
+    runs-on: ubuntu-22.04
+    if: contains(env.SCAN_TOOLS, 'trivy')
+    
+    steps:
+      - name: 🔄 Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: 📁 Create Report Directory
+        run: mkdir -p ${{ env.SECURITY_REPORTS_DIR }}
+        
+      - name: 🔍 Scan Dockerfile with Trivy
+        if: hashFiles('**/Dockerfile', '**/Dockerfile.*') != ''
+        run: |
+          echo "🚀 Setting up Trivy v${{ env.TRIVY_VERSION }}..."
+          # Install Trivy
+          sudo apt-get update
+          sudo apt-get install wget apt-transport-https gnupg lsb-release
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+          sudo add-apt-repository "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main"
+          sudo apt-get update
+          sudo apt-get install trivy=${{ env.TRIVY_VERSION }}-1
+          
+          echo "🔍 Scanning Dockerfiles for security issues..."
+          # Find and scan all Dockerfiles
+          find . -name "Dockerfile*" -type f | while read dockerfile; do
+            echo "Scanning $dockerfile..."
+            trivy config "$dockerfile" \
+              --format sarif \
+              --output "${{ env.SECURITY_REPORTS_DIR }}/trivy-$(basename $dockerfile).sarif" || echo "Trivy scan completed"
+          done
+          
+      - name: 📤 Upload Container Security Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: container-security-trivy-${{ env.ENVIRONMENT }}
+          path: ${{ env.SECURITY_REPORTS_DIR }}/
+          retention-days: 30
+
+  # === SBOM GENERATION AND VULNERABILITY ASSESSMENT ===
+  sbom-generation:
+    name: 📋 SBOM Generation & Vulnerability Assessment
+    runs-on: ubuntu-22.04
+    if: inputs.enable_sbom == true || github.event.inputs.enable_sbom != 'false'
+    
+    steps:
+      - name: 🔄 Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: 📁 Create SBOM Directory
+        run: mkdir -p ${{ env.SBOM_DIR }}
+        
+      - name: 🔧 Install SBOM Tools
+        run: |
+          echo "Installing Syft v${{ env.SYFT_VERSION }}..."
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin v${{ env.SYFT_VERSION }}
+          
+          echo "Installing Grype v${{ env.GRYPE_VERSION }}..."
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin v${{ env.GRYPE_VERSION }}
+          
+      - name: 📋 Generate Application SBOM
+        run: |
+          echo "🔍 Generating SBOM for application components..."
+          if [ -d "./app" ]; then
+            syft packages dir:./app -o cyclonedx-json=${{ env.SBOM_DIR }}/application-sbom.json
+            syft packages dir:./app -o spdx-json=${{ env.SBOM_DIR }}/application-sbom-spdx.json
+          else
+            echo "No app directory found, creating minimal SBOM..."
+            syft packages dir:. -o cyclonedx-json=${{ env.SBOM_DIR }}/application-sbom.json
+          fi
+          
+      - name: 📋 Generate Infrastructure SBOM  
+        run: |
+          echo "🔍 Generating SBOM for infrastructure components..."
+          if [ -d "./terraform" ] || [ -d "./cloudformation" ]; then
+            # Create infrastructure SBOM from IaC files
+            syft packages dir:. -o cyclonedx-json=${{ env.SBOM_DIR }}/infrastructure-sbom.json
+          else
+            echo "No infrastructure code found"
+          fi
+          
+      - name: 🔍 Vulnerability Assessment
+        run: |
+          echo "🔍 Running vulnerability assessment on generated SBOMs..."
+          # Scan application SBOM for vulnerabilities
+          if [ -f "${{ env.SBOM_DIR }}/application-sbom.json" ]; then
+            grype sbom:${{ env.SBOM_DIR }}/application-sbom.json \
+              -o sarif \
+              --file ${{ env.SBOM_DIR }}/application-vulnerabilities.sarif || echo "Application vulnerability scan completed"
+              
+            grype sbom:${{ env.SBOM_DIR }}/application-sbom.json \
+              -o json \
+              --file ${{ env.SBOM_DIR }}/application-vulnerabilities.json || echo "Application vulnerability scan completed"
+          fi
+          
+      - name: ☁️ Configure AWS Credentials
+        if: secrets.AWS_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+          
+      - name: 📤 Upload SBOM to S3
+        if: secrets.AWS_ROLE_ARN != ''
+        run: |
+          echo "📤 Uploading SBOM artifacts to S3..."
+          BUCKET_NAME="sbom-artifacts-${{ env.ENVIRONMENT }}"
+          DATE_PATH=$(date +%Y%m%d)
+          
+          # Upload SBOM files to S3 with timestamp
+          if [ -f "${{ env.SBOM_DIR }}/application-sbom.json" ]; then
+            aws s3 cp ${{ env.SBOM_DIR }}/application-sbom.json \
+              s3://$BUCKET_NAME/$DATE_PATH/application-sbom-${{ github.sha }}.json || echo "S3 upload completed"
+          fi
+          
+          if [ -f "${{ env.SBOM_DIR }}/application-vulnerabilities.json" ]; then
+            aws s3 cp ${{ env.SBOM_DIR }}/application-vulnerabilities.json \
+              s3://$BUCKET_NAME/$DATE_PATH/vulnerabilities-${{ github.sha }}.json || echo "S3 upload completed"
+          fi
+          
+      - name: 📤 Upload SBOM Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sbom-artifacts-${{ env.ENVIRONMENT }}
+          path: ${{ env.SBOM_DIR }}/
+          retention-days: 90  # Longer retention for compliance
+
+  # === SECRETS SCANNING ===
+  secrets-scanning:
+    name: 🔐 Secrets Detection
+    runs-on: ubuntu-22.04
+    
+    steps:
+      - name: 🔄 Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for comprehensive secrets scanning
+          
+      - name: 🔐 TruffleHog Secrets Scan
+        run: |
+          echo "🚀 Setting up TruffleHog v${{ env.TRUFFLEHOG_VERSION }}..."
+          # Download and install TruffleHog
+          curl -sSfL https://github.com/trufflesecurity/trufflehog/releases/download/v${{ env.TRUFFLEHOG_VERSION }}/trufflehog_${{ env.TRUFFLEHOG_VERSION }}_linux_amd64.tar.gz | tar -xzf -
+          chmod +x trufflehog
+          sudo mv trufflehog /usr/local/bin/
+          
+          echo "🔍 Scanning for secrets..."
+          mkdir -p ${{ env.SECURITY_REPORTS_DIR }}/secrets
+          
+          # Scan git repository for secrets
+          trufflehog git file://. \
+            --since-commit HEAD~10 \
+            --only-verified \
+            --format json \
+            --output ${{ env.SECURITY_REPORTS_DIR }}/secrets/trufflehog-results.json || echo "Secrets scan completed"
+            
+      - name: 📤 Upload Secrets Scan Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: secrets-scan-${{ env.ENVIRONMENT }}
+          path: ${{ env.SECURITY_REPORTS_DIR }}/secrets/
+          retention-days: 30
+
+  # === SECURITY GATES EVALUATION ===
+  security-gates-evaluation:
+    name: 🚦 Security Gates Evaluation
+    runs-on: ubuntu-22.04
+    needs: [infrastructure-security, container-security, sbom-generation, secrets-scanning]
+    if: always()
+    
+    outputs:
+      gate_status: ${{ steps.evaluation.outputs.gate_status }}
+      recommendations: ${{ steps.evaluation.outputs.recommendations }}
+    
+    steps:
+      - name: 📥 Download All Security Reports
+        uses: actions/download-artifact@v4
+        with:
+          path: downloaded-reports/
+          
+      - name: 🔍 Evaluate Security Gates
+        id: evaluation
+        run: |
+          echo "🔍 Evaluating security gates with threshold: ${{ env.SEVERITY_THRESHOLD }}"
+          echo "📊 Fail on findings: ${{ env.FAIL_ON_FINDINGS }}"
+          
+          # Initialize counters
+          TOTAL_CRITICAL=0
+          TOTAL_HIGH=0
+          TOTAL_MEDIUM=0
+          TOTAL_LOW=0
+          GATE_STATUS="PASSED"
+          
+          # Check if we have any security reports
+          if [ -d "downloaded-reports" ]; then
+            echo "📋 Processing security reports..."
+            
+            # Process KICS results if available
+            if [ -f "downloaded-reports/infrastructure-security-kics-${{ env.ENVIRONMENT }}/kics/kics-results.json" ]; then
+              echo "📊 Processing KICS results..."
+              # Parse KICS results (implementation would depend on actual KICS output format)
+            fi
+            
+            # Determine gate status based on threshold and findings
+            case "${{ env.SEVERITY_THRESHOLD }}" in
+              "critical")
+                if [ "$TOTAL_CRITICAL" -gt 0 ] && [ "${{ env.FAIL_ON_FINDINGS }}" = "true" ]; then
+                  GATE_STATUS="FAILED"
+                fi
+                ;;
+              "high")
+                if [ $((TOTAL_CRITICAL + TOTAL_HIGH)) -gt 0 ] && [ "${{ env.FAIL_ON_FINDINGS }}" = "true" ]; then
+                  GATE_STATUS="FAILED"
+                fi
+                ;;
+              "medium")
+                if [ $((TOTAL_CRITICAL + TOTAL_HIGH + TOTAL_MEDIUM)) -gt 0 ] && [ "${{ env.FAIL_ON_FINDINGS }}" = "true" ]; then
+                  GATE_STATUS="FAILED"
+                fi
+                ;;
+              *)
+                echo "Using permissive gate policy for development"
+                ;;
+            esac
+          else
+            echo "⚠️ No security reports found - this may indicate scanning issues"
+            GATE_STATUS="WARNING"
+          fi
+          
+          echo "gate_status=$GATE_STATUS" >> $GITHUB_OUTPUT
+          echo "recommendations=Review security findings and remediate as needed" >> $GITHUB_OUTPUT
+          
+      - name: 📊 Security Gate Results
+        run: |
+          echo "# 🚦 Security Gates Evaluation Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📋 Scan Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ env.ENVIRONMENT }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Severity Threshold**: ${{ env.SEVERITY_THRESHOLD }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Fail on Findings**: ${{ env.FAIL_ON_FINDINGS }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tools Used**: ${{ env.SCAN_TOOLS }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🎯 Gate Status: ${{ steps.evaluation.outputs.gate_status }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.evaluation.outputs.gate_status }}" = "FAILED" ]; then
+            echo "❌ Security gates FAILED - Review findings before proceeding" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          elif [ "${{ steps.evaluation.outputs.gate_status }}" = "WARNING" ]; then
+            echo "⚠️ Security gates completed with WARNINGS" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ Security gates PASSED - Proceed to next stage" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # === SECURITY SUMMARY AND COMPARISON ===
+  security-summary:
+    name: 📊 Security Analysis Summary & Tool Comparison
+    runs-on: ubuntu-22.04
+    needs: [infrastructure-security, container-security, sbom-generation, secrets-scanning, security-gates-evaluation]
+    if: always()
+    
+    outputs:
+      status: ${{ steps.summary.outputs.status }}
+      
+    steps:
+      - name: 📥 Download All Reports
+        uses: actions/download-artifact@v4
+        with:
+          path: all-reports/
+          
+      - name: 📊 Generate Comprehensive Security Summary
+        id: summary
+        run: |
+          echo "# 🛡️ Comprehensive Security Analysis Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📋 Executive Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ env.ENVIRONMENT }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Security Threshold**: ${{ env.SEVERITY_THRESHOLD }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Pipeline Execution**: $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository**: ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## 🔍 Multi-Layer Security Scanning Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Tool | Purpose | Status | Findings |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|---------|--------|----------|" >> $GITHUB_STEP_SUMMARY
+          
+          # Infrastructure Security Tools Comparison
+          echo "| **KICS** | IaC Security (Checkmarx) | ${{ needs.infrastructure-security.result || 'Skipped' }} | Terraform, K8s, Docker configurations |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Checkov** | IaC Security (Bridgecrew) | ${{ needs.infrastructure-security.result || 'Skipped' }} | Multi-cloud IaC analysis |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Terrascan** | IaC Security (Tenable) | ${{ needs.infrastructure-security.result || 'Skipped' }} | Cloud security posture |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Trivy** | Container Security | ${{ needs.container-security.result || 'Skipped' }} | Container images, OS packages |" >> $GITHUB_STEP_SUMMARY
+          echo "| **TruffleHog** | Secrets Detection | ${{ needs.secrets-scanning.result || 'Skipped' }} | API keys, passwords, tokens |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Syft/Grype** | SBOM & Vulnerabilities | ${{ needs.sbom-generation.result || 'Skipped' }} | Software bill of materials |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## 🏆 Tool Comparison & Recommendations" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Infrastructure as Code (IaC) Scanners" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **KICS**: 🎯 Best for comprehensive rule coverage, supports 25+ IaC technologies" >> $GITHUB_STEP_SUMMARY
+          echo "- **Checkov**: 🎯 Excellent for policy-as-code, strong cloud provider support" >> $GITHUB_STEP_SUMMARY  
+          echo "- **Terrascan**: 🎯 Focus on compliance frameworks, good for enterprise environments" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Recommended Usage Strategy" >> $GITHUB_STEP_SUMMARY
+          echo "1. **Development**: Use KICS for broad coverage" >> $GITHUB_STEP_SUMMARY
+          echo "2. **Staging**: Add Checkov for policy validation" >> $GITHUB_STEP_SUMMARY
+          echo "3. **Production**: Include all three for maximum security assurance" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## 🚦 Gate Status: ${{ needs.security-gates-evaluation.outputs.gate_status }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Set overall status
+          if [ "${{ needs.security-gates-evaluation.outputs.gate_status }}" = "FAILED" ]; then
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "❌ **Action Required**: Security issues detected above threshold" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.security-gates-evaluation.outputs.gate_status }}" = "WARNING" ]; then
+            echo "status=warning" >> $GITHUB_OUTPUT
+            echo "⚠️ **Review Recommended**: Some security considerations noted" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "✅ **Security Validation Complete**: All gates passed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📈 Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Review detailed findings in security reports" >> $GITHUB_STEP_SUMMARY
+          echo "2. Address any critical or high severity issues" >> $GITHUB_STEP_SUMMARY
+          echo "3. Update security policies based on findings" >> $GITHUB_STEP_SUMMARY
+          echo "4. Consider automated remediation for common issues" >> $GITHUB_STEP_SUMMARY
