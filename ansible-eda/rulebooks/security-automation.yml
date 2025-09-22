@@ -1,0 +1,200 @@
+# 🛡️ EDA Security Automation Rulebook
+# Advanced security event processing with AI-driven responses
+
+---
+- name: "DevSecOps Security Event Processing"
+  hosts: localhost
+  sources:
+    # Primary security webhook endpoint
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+        endpoint: /security-alert
+        
+    # N8N AI agent webhook
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5001
+        endpoint: /ai-security-response
+        
+    # GitHub Actions webhook
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+        endpoint: /github-security
+
+  rules:
+    # Critical Security Alert - Immediate Response
+    - name: "Critical Security Incident"
+      condition: >
+        event.payload.severity == "critical" or
+        (event.payload.cvss_score is defined and event.payload.cvss_score >= 9.0)
+      actions:
+        - run_playbook:
+            name: playbooks/critical-incident-response.yml
+            extra_vars:
+              alert_id: "{{ event.payload.alert_id | default('CRIT-' + ansible_date_time.epoch) }}"
+              severity: "{{ event.payload.severity }}"
+              cvss_score: "{{ event.payload.cvss_score | default('unknown') }}"
+              affected_systems: "{{ event.payload.affected_systems | default([]) }}"
+              source: "{{ event.payload.source | default('unknown') }}"
+              timestamp: "{{ ansible_date_time.iso8601 }}"
+              
+    # High Severity Security Alert
+    - name: "High Severity Security Alert"
+      condition: >
+        event.payload.severity == "high" or
+        (event.payload.cvss_score is defined and event.payload.cvss_score >= 7.0 and event.payload.cvss_score < 9.0)
+      actions:
+        - run_playbook:
+            name: playbooks/high-severity-response.yml
+            extra_vars:
+              alert_id: "{{ event.payload.alert_id | default('HIGH-' + ansible_date_time.epoch) }}"
+              severity: "{{ event.payload.severity }}"
+              vulnerability_details: "{{ event.payload.vulnerability | default({}) }}"
+              remediation_priority: "high"
+              
+    # AI-Driven Security Analysis
+    - name: "AI Security Analysis Response"
+      condition: >
+        event.payload.source == "n8n-ai-agent" and
+        event.payload.analysis_complete == true
+      actions:
+        - run_playbook:
+            name: playbooks/ai-analysis-processor.yml
+            extra_vars:
+              analysis_id: "{{ event.payload.analysis_id }}"
+              ai_recommendation: "{{ event.payload.ai_recommendation }}"
+              confidence_score: "{{ event.payload.confidence_score | default(0) }}"
+              compliance_impact: "{{ event.payload.compliance_impact | default({}) }}"
+              automated_actions: "{{ event.payload.automated_actions | default([]) }}"
+              
+    # Container Security Event
+    - name: "Container Security Violation"
+      condition: >
+        event.payload.type == "container_security" and
+        (event.payload.severity == "high" or event.payload.severity == "critical")
+      actions:
+        - run_playbook:
+            name: playbooks/container-security-response.yml
+            extra_vars:
+              container_id: "{{ event.payload.container_id }}"
+              image_name: "{{ event.payload.image_name }}"
+              vulnerability_count: "{{ event.payload.vulnerability_count | default(0) }}"
+              policy_violation: "{{ event.payload.policy_violation | default(false) }}"
+              
+    # Infrastructure Security Event
+    - name: "Infrastructure Security Issue"
+      condition: >
+        event.payload.type == "infrastructure" and
+        event.payload.security_control_failed == true
+      actions:
+        - run_playbook:
+            name: playbooks/infrastructure-security-remediation.yml
+            extra_vars:
+              resource_type: "{{ event.payload.resource_type }}"
+              resource_id: "{{ event.payload.resource_id }}"
+              failed_controls: "{{ event.payload.failed_controls | default([]) }}"
+              compliance_framework: "{{ event.payload.compliance_framework | default('unknown') }}"
+              
+    # SLSA Compliance Violation
+    - name: "SLSA Supply Chain Violation"
+      condition: >
+        event.payload.compliance_framework == "slsa" and
+        event.payload.violation_detected == true
+      actions:
+        - run_playbook:
+            name: playbooks/slsa-compliance-remediation.yml
+            extra_vars:
+              slsa_level: "{{ event.payload.slsa_level | default(3) }}"
+              violation_type: "{{ event.payload.violation_type }}"
+              build_provenance: "{{ event.payload.build_provenance | default(false) }}"
+              artifact_integrity: "{{ event.payload.artifact_integrity | default('unknown') }}"
+              
+    # Pipeline Security Gate Failure
+    - name: "Pipeline Security Gate Failure"
+      condition: >
+        event.payload.source == "github-actions" and
+        event.payload.security_gate_status == "failed"
+      actions:
+        - run_playbook:
+            name: playbooks/pipeline-security-failure.yml
+            extra_vars:
+              workflow_name: "{{ event.payload.workflow_name }}"
+              job_name: "{{ event.payload.job_name }}"
+              failure_reason: "{{ event.payload.failure_reason }}"
+              repository: "{{ event.payload.repository }}"
+              branch: "{{ event.payload.branch }}"
+              commit_sha: "{{ event.payload.commit_sha }}"
+              
+    # Secrets Detection Alert
+    - name: "Secrets Exposure Detected"
+      condition: >
+        event.payload.type == "secrets_detection" and
+        event.payload.secrets_found == true
+      actions:
+        - run_playbook:
+            name: playbooks/secrets-remediation.yml
+            extra_vars:
+              secret_type: "{{ event.payload.secret_type }}"
+              file_path: "{{ event.payload.file_path }}"
+              commit_sha: "{{ event.payload.commit_sha }}"
+              repository: "{{ event.payload.repository }}"
+              immediate_revocation: true
+              
+    # Compliance Monitoring Event
+    - name: "Compliance Framework Monitoring"
+      condition: >
+        event.payload.type == "compliance_check" and
+        event.payload.compliance_status == "non_compliant"
+      actions:
+        - run_playbook:
+            name: playbooks/compliance-remediation.yml
+            extra_vars:
+              framework: "{{ event.payload.framework }}"
+              control_id: "{{ event.payload.control_id }}"
+              finding_severity: "{{ event.payload.severity }}"
+              remediation_timeline: "{{ event.payload.remediation_timeline | default('24h') }}"
+              
+    # Vulnerability Management
+    - name: "Vulnerability Scan Results"
+      condition: >
+        event.payload.type == "vulnerability_scan" and
+        event.payload.critical_vulns > 0
+      actions:
+        - run_playbook:
+            name: playbooks/vulnerability-management.yml
+            extra_vars:
+              scan_id: "{{ event.payload.scan_id }}"
+              critical_count: "{{ event.payload.critical_vulns }}"
+              high_count: "{{ event.payload.high_vulns | default(0) }}"
+              scan_type: "{{ event.payload.scan_type }}"
+              remediation_required: true
+              
+    # Security Metrics and Reporting
+    - name: "Security Metrics Collection"
+      condition: >
+        event.payload.type == "metrics" and
+        event.payload.metric_type == "security"
+      actions:
+        - run_playbook:
+            name: playbooks/security-metrics-processor.yml
+            extra_vars:
+              metric_name: "{{ event.payload.metric_name }}"
+              metric_value: "{{ event.payload.metric_value }}"
+              timestamp: "{{ event.payload.timestamp | default(ansible_date_time.iso8601) }}"
+              environment: "{{ event.payload.environment | default('unknown') }}"
+              
+    # Catch-all for Unknown Events
+    - name: "Unknown Security Event Logger"
+      condition: >
+        event.payload.type is defined and
+        event.payload.type not in ['container_security', 'infrastructure', 'vulnerability_scan', 'compliance_check', 'secrets_detection', 'metrics']
+      actions:
+        - run_playbook:
+            name: playbooks/unknown-event-logger.yml
+            extra_vars:
+              event_type: "{{ event.payload.type }}"
+              raw_payload: "{{ event.payload }}"
+              source: "{{ event.payload.source | default('unknown') }}"
+              investigation_required: true
