@@ -1,0 +1,224 @@
+# 📊 Grafana + Prometheus Monitoring Stack for DevSecOps Pipeline
+# Complete monitoring solution with alerting and visualization
+
+version: '3.8'
+
+services:
+  # Prometheus - Metrics collection
+  prometheus:
+    image: prom/prometheus:v2.47.2
+    container_name: prometheus-devsecops
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus/rules:/etc/prometheus/rules
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    networks:
+      - monitoring
+    labels:
+      - "com.devsecops.service=prometheus"
+      - "com.devsecops.monitoring=true"
+
+  # Grafana - Visualization and dashboards
+  grafana:
+    image: grafana/grafana:10.1.5
+    container_name: grafana-devsecops
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin123!}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/dashboard-configs:/var/lib/grafana/dashboards
+    depends_on:
+      - prometheus
+    networks:
+      - monitoring
+    labels:
+      - "com.devsecops.service=grafana"
+      - "com.devsecops.monitoring=true"
+
+  # Node Exporter - System metrics
+  node_exporter:
+    image: prom/node-exporter:v1.6.1
+    container_name: node-exporter-devsecops
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    networks:
+      - monitoring
+    labels:
+      - "com.devsecops.service=node-exporter"
+      - "com.devsecops.monitoring=true"
+
+  # cAdvisor - Container metrics
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.2
+    container_name: cadvisor-devsecops
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    privileged: true
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    networks:
+      - monitoring
+    labels:
+      - "com.devsecops.service=cadvisor"
+      - "com.devsecops.monitoring=true"
+
+  # Alertmanager - Alert management
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: alertmanager-devsecops
+    restart: unless-stopped
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+      - alertmanager_data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--web.external-url=http://localhost:9093'
+    networks:
+      - monitoring
+    labels:
+      - "com.devsecops.service=alertmanager"
+      - "com.devsecops.monitoring=true"
+
+  # Loki - Log aggregation
+  loki:
+    image: grafana/loki:2.9.2
+    container_name: loki-devsecops
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/local-config.yaml
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - monitoring
+    labels:
+      - "com.devsecops.service=loki"
+      - "com.devsecops.monitoring=true"
+
+  # Promtail - Log collection
+  promtail:
+    image: grafana/promtail:2.9.2
+    container_name: promtail-devsecops
+    restart: unless-stopped
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/config.yml
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+    networks:
+      - monitoring
+    labels:
+      - "com.devsecops.service=promtail"
+      - "com.devsecops.monitoring=true"
+
+  # GitHub Exporter - GitHub Actions metrics
+  github_exporter:
+    image: githubexporter/github-exporter:latest
+    container_name: github-exporter-devsecops
+    restart: unless-stopped
+    ports:
+      - "9171:9171"
+    environment:
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GITHUB_ORGS=papaert-cloud
+      - GITHUB_REPOS=BeaconAgileHub-security-CI-CDpipelines,enterprise-devsecops-superlab
+    networks:
+      - monitoring
+    labels:
+      - "com.devsecops.service=github-exporter"
+      - "com.devsecops.monitoring=true"
+
+  # Security Metrics Collector (Custom)
+  security_metrics:
+    image: alpine:3.18
+    container_name: security-metrics-devsecops
+    restart: unless-stopped
+    volumes:
+      - ./security-metrics/collector.sh:/usr/local/bin/collector.sh
+      - ./security-metrics/metrics:/metrics
+    command: |
+      sh -c '
+        while true; do
+          /usr/local/bin/collector.sh
+          sleep 300
+        done
+      '
+    networks:
+      - monitoring
+    labels:
+      - "com.devsecops.service=security-metrics"
+      - "com.devsecops.monitoring=true"
+
+volumes:
+  prometheus_data:
+    driver: local
+    labels:
+      - "com.devsecops.volume=prometheus-data"
+      
+  grafana_data:
+    driver: local
+    labels:
+      - "com.devsecops.volume=grafana-data"
+      
+  alertmanager_data:
+    driver: local
+    labels:
+      - "com.devsecops.volume=alertmanager-data"
+      
+  loki_data:
+    driver: local
+    labels:
+      - "com.devsecops.volume=loki-data"
+
+networks:
+  monitoring:
+    driver: bridge
+    labels:
+      - "com.devsecops.network=monitoring"
+    ipam:
+      config:
+        - subnet: 172.25.0.0/16
