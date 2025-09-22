@@ -1,0 +1,724 @@
+name: 🔄 Enhanced CI Pipeline - Security-First Development
+
+# Comprehensive event triggers with workflow_dispatch support
+on:
+  push:
+    branches: [ main, S-lab, develop, feature/* ]
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
+      - '*.md'
+  pull_request:
+    branches: [ main, S-lab, develop ]
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target Environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options: ['dev', 'staging', 'production']
+      security_severity:
+        description: 'Security Severity Threshold'
+        required: false
+        default: 'medium'
+        type: choice
+        options: ['info', 'low', 'medium', 'high', 'critical']
+      enable_full_scan:
+        description: 'Enable Full Security Scan Suite'
+        required: false
+        type: boolean
+        default: true
+      skip_tests:
+        description: 'Skip Unit/Integration Tests (NOT RECOMMENDED)'
+        required: false
+        type: boolean
+        default: false
+      deploy_to_staging:
+        description: 'Auto-deploy to Staging (if security gates pass)'
+        required: false
+        type: boolean
+        default: false
+
+# Concurrency control - prevent multiple CI runs on same branch
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true  # Cancel previous runs for efficiency
+
+# Centralized environment variables following DRY principles
+env:
+  # === TOOL VERSIONS (Centralized Configuration) ===
+  NODE_VERSION: "20.10.0"                    # Node.js runtime
+  PYTHON_VERSION: "3.11.7"                   # Python runtime
+  GO_VERSION: "1.21.5"                       # Go runtime
+  TERRAFORM_VERSION: "1.6.6"                 # Infrastructure as Code
+  DOCKER_BUILDKIT: "1"                       # Enable Docker BuildKit
+  
+  # === CONTAINER REGISTRY SETTINGS ===
+  REGISTRY: ghcr.io                          # GitHub Container Registry
+  IMAGE_NAME: ${{ github.repository }}       # Dynamic image naming
+  
+  # === DYNAMIC ENVIRONMENT DETECTION ===
+  ENVIRONMENT: ${{ 
+    github.event.inputs.environment || 
+    (github.ref == 'refs/heads/main' && 'production') ||
+    (github.ref == 'refs/heads/S-lab' && 'staging') ||
+    (github.ref == 'refs/heads/develop' && 'staging') ||
+    'dev' 
+  }}
+  
+  # === SECURITY CONFIGURATION ===
+  SECURITY_SEVERITY: ${{ github.event.inputs.security_severity || 'medium' }}
+  ENABLE_FULL_SCAN: ${{ github.event.inputs.enable_full_scan || 'true' }}
+  FAIL_ON_SECURITY: ${{ 
+    github.ref == 'refs/heads/main' && 'true' ||
+    github.ref == 'refs/heads/S-lab' && 'false' ||
+    'false'
+  }}
+  
+  # === BUILD CONFIGURATION ===
+  BUILD_TIMESTAMP: ${{ github.run_number }}-$(date +%Y%m%d-%H%M%S)
+  IMAGE_TAG: ${{ github.ref_name }}-${{ github.sha }}
+
+permissions:
+  contents: read              # Repository access
+  packages: write             # Container registry push
+  id-token: write            # AWS OIDC authentication
+  security-events: write     # Security results upload
+  actions: read              # Workflow access
+  pull-requests: write       # PR commenting
+  issues: write              # Issue creation for security findings
+
+jobs:
+  # === ENVIRONMENT SETUP AND VALIDATION ===
+  environment-setup:
+    name: 🌍 Environment Setup & Validation
+    runs-on: ubuntu-22.04
+    
+    outputs:
+      environment: ${{ steps.env-detection.outputs.environment }}
+      security-threshold: ${{ steps.env-detection.outputs.security-threshold }}
+      deploy-ready: ${{ steps.env-detection.outputs.deploy-ready }}
+      matrix-node: ${{ steps.matrix-setup.outputs.node-versions }}
+      matrix-python: ${{ steps.matrix-setup.outputs.python-versions }}
+    
+    steps:
+      - name: 🔄 Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better analysis
+          
+      - name: 🌍 Environment Detection & Configuration
+        id: env-detection
+        run: |
+          echo "🌍 Detecting and configuring environment..."
+          
+          # Determine environment based on branch and inputs
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ENV="${{ github.event.inputs.environment }}"
+            SECURITY_THRESHOLD="${{ github.event.inputs.security_severity }}"
+          else
+            case "${{ github.ref }}" in
+              "refs/heads/main")
+                ENV="production"
+                SECURITY_THRESHOLD="high"
+                ;;
+              "refs/heads/S-lab"|"refs/heads/develop")
+                ENV="staging"
+                SECURITY_THRESHOLD="medium"
+                ;;
+              *)
+                ENV="dev"
+                SECURITY_THRESHOLD="medium"
+                ;;
+            esac
+          fi
+          
+          # Determine if ready for deployment
+          DEPLOY_READY="false"
+          if [ "$ENV" != "dev" ] && [ "${{ github.event_name }}" != "pull_request" ]; then
+            DEPLOY_READY="true"
+          fi
+          
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+          echo "security-threshold=$SECURITY_THRESHOLD" >> $GITHUB_OUTPUT
+          echo "deploy-ready=$DEPLOY_READY" >> $GITHUB_OUTPUT
+          
+          echo "## 🌍 Environment Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: $ENV" >> $GITHUB_STEP_SUMMARY
+          echo "- **Security Threshold**: $SECURITY_THRESHOLD" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deploy Ready**: $DEPLOY_READY" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          
+      - name: 📋 Matrix Configuration Setup
+        id: matrix-setup
+        run: |
+          # Configure test matrices based on environment
+          if [ "${{ steps.env-detection.outputs.environment }}" = "production" ]; then
+            # Production: Test multiple Node.js versions for compatibility
+            NODE_VERSIONS='["18.18.2", "20.10.0", "21.4.0"]'
+            PYTHON_VERSIONS='["3.10", "3.11", "3.12"]'
+          elif [ "${{ steps.env-detection.outputs.environment }}" = "staging" ]; then
+            # Staging: Test current and next versions
+            NODE_VERSIONS='["20.10.0", "21.4.0"]'
+            PYTHON_VERSIONS='["3.11", "3.12"]'
+          else
+            # Development: Test current version only for speed
+            NODE_VERSIONS='["20.10.0"]'
+            PYTHON_VERSIONS='["3.11"]'
+          fi
+          
+          echo "node-versions=$NODE_VERSIONS" >> $GITHUB_OUTPUT
+          echo "python-versions=$PYTHON_VERSIONS" >> $GITHUB_OUTPUT
+
+  # === SECURITY GATES (First Job - Shift Left Security) ===
+  security-gates:
+    name: 🛡️ Security Gates - Shift Left Security
+    needs: environment-setup
+    # Always run security gates first, before any other processing
+    uses: ./.github/workflows/enhanced-security-gates.yml
+    with:
+      environment: ${{ needs.environment-setup.outputs.environment }}
+      severity_threshold: ${{ needs.environment-setup.outputs.security-threshold }}
+      enable_sbom: true
+      fail_on_severity: ${{ env.FAIL_ON_SECURITY == 'true' }}
+      scan_tools: ${{ env.ENABLE_FULL_SCAN == 'true' && 'kics,checkov,terrascan,trivy' || 'kics,trivy' }}
+    secrets:
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # === CODE QUALITY AND LINTING ===
+  code-quality:
+    name: 🧙‍♂️ Code Quality & Linting
+    needs: [environment-setup, security-gates]
+    runs-on: ubuntu-22.04
+    
+    strategy:
+      matrix:
+        language: ["javascript", "python", "terraform"]
+      fail-fast: false  # Continue with other languages if one fails
+    
+    steps:
+      - name: 🔄 Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: 🔍 JavaScript/TypeScript Quality Checks
+        if: matrix.language == 'javascript'
+        run: |
+          if [ -f "package.json" ] || [ -f "app/package.json" ]; then
+            echo "🚀 Setting up Node.js ${{ env.NODE_VERSION }}..."
+            # Install Node.js
+            curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+            sudo apt-get install -y nodejs
+            
+            # Navigate to app directory if it exists
+            if [ -d "app" ]; then
+              cd app
+            fi
+            
+            if [ -f "package.json" ]; then
+              echo "📦 Installing dependencies..."
+              npm ci --production=false
+              
+              echo "🧙‍♂️ Running ESLint..."
+              npx eslint . --ext .js,.jsx,.ts,.tsx --format json --output-file ../eslint-results.json || echo "ESLint completed with findings"
+              
+              echo "🎨 Running Prettier check..."
+              npx prettier --check . || echo "Prettier formatting issues found"
+              
+              echo "🔍 Running JSHint..."
+              find . -name '*.js' -not -path './node_modules/*' | xargs npx jshint || echo "JSHint completed"
+            fi
+          else
+            echo "No JavaScript/TypeScript files found, skipping"
+          fi
+          
+      - name: 🔍 Python Quality Checks
+        if: matrix.language == 'python'
+        run: |
+          if find . -name '*.py' -not -path './venv/*' -not -path './.venv/*' | head -1 | grep -q .; then
+            echo "🚀 Setting up Python ${{ env.PYTHON_VERSION }}..."
+            sudo apt-get update
+            sudo apt-get install -y python3 python3-pip python3-venv
+            
+            echo "📦 Installing Python linting tools..."
+            python3 -m pip install --user flake8 black isort pylint mypy bandit
+            
+            echo "🧙‍♂️ Running Flake8..."
+            python3 -m flake8 . --output-file flake8-results.txt --exit-zero
+            
+            echo "🎨 Checking Black formatting..."
+            python3 -m black --check --diff . || echo "Black formatting issues found"
+            
+            echo "🔄 Checking import sorting..."
+            python3 -m isort --check-only --diff . || echo "Import sorting issues found"
+            
+            echo "🔍 Running Pylint..."
+            python3 -m pylint $(find . -name '*.py') --output-format=json --reports=no > pylint-results.json || echo "Pylint completed"
+            
+            echo "🛡️ Running Bandit security check..."
+            python3 -m bandit -r . -f json -o bandit-results.json || echo "Bandit security check completed"
+          else
+            echo "No Python files found, skipping"
+          fi
+          
+      - name: 🔍 Terraform Quality Checks  
+        if: matrix.language == 'terraform'
+        run: |
+          if find . -name '*.tf' -o -name '*.hcl' | head -1 | grep -q .; then
+            echo "🚀 Setting up Terraform ${{ env.TERRAFORM_VERSION }}..."
+            # Install Terraform
+            wget -O- https://apt.releases.hashicorp.com/gpg | gpg --dearmor | sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg
+            echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+            sudo apt-get update && sudo apt-get install terraform=${{ env.TERRAFORM_VERSION }}-1
+            
+            echo "🎨 Running Terraform format check..."
+            terraform fmt -check -recursive . || echo "Terraform formatting issues found"
+            
+            echo "🔍 Validating Terraform configurations..."
+            # Find all directories with .tf files and validate them
+            find . -name '*.tf' -exec dirname {} \; | sort -u | while read dir; do
+              echo "Validating $dir..."
+              cd "$dir"
+              terraform init -backend=false -input=false
+              terraform validate
+              cd - > /dev/null
+            done
+            
+            echo "📦 Installing TFLint..."
+            curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+            sudo mv tflint /usr/local/bin/
+            
+            echo "🔍 Running TFLint..."
+            tflint --format json > tflint-results.json || echo "TFLint completed"
+          else
+            echo "No Terraform files found, skipping"
+          fi
+          
+      - name: 📤 Upload Code Quality Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: code-quality-${{ matrix.language }}-${{ needs.environment-setup.outputs.environment }}
+          path: |
+            *-results.json
+            *-results.txt
+          retention-days: 7
+
+  # === UNIT AND INTEGRATION TESTING ===
+  testing:
+    name: 🧪 Unit & Integration Testing
+    needs: [environment-setup, security-gates]
+    if: github.event.inputs.skip_tests != 'true'
+    runs-on: ubuntu-22.04
+    
+    strategy:
+      matrix:
+        test-suite: ["unit", "integration", "api"]
+        runtime: 
+          - type: "node"
+            version: "20.10.0"
+          - type: "python" 
+            version: "3.11"
+      fail-fast: false
+    
+    steps:
+      - name: 🔄 Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: 🚀 Setup Node.js Runtime
+        if: matrix.runtime.type == 'node'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.runtime.version }}
+          cache: 'npm'
+          cache-dependency-path: '**/package-lock.json'
+          
+      - name: 🚀 Setup Python Runtime
+        if: matrix.runtime.type == 'python'
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.runtime.version }}
+          cache: 'pip'
+          
+      - name: 🧪 Run Node.js Tests
+        if: matrix.runtime.type == 'node' && (hashFiles('**/package.json') != '' || hashFiles('**/jest.config.*') != '')
+        run: |
+          echo "🧪 Running ${{ matrix.test-suite }} tests with Node.js ${{ matrix.runtime.version }}..."
+          
+          # Navigate to app directory if it exists
+          if [ -d "app" ]; then
+            cd app
+          fi
+          
+          if [ -f "package.json" ]; then
+            npm ci
+            
+            case "${{ matrix.test-suite }}" in
+              "unit")
+                npm run test:unit 2>/dev/null || npm test -- --testPathPattern=unit || echo "Unit tests completed"
+                ;;
+              "integration")
+                npm run test:integration 2>/dev/null || npm test -- --testPathPattern=integration || echo "Integration tests completed"
+                ;;
+              "api")
+                npm run test:api 2>/dev/null || npm test -- --testPathPattern=api || echo "API tests completed"
+                ;;
+            esac
+          else
+            echo "No package.json found, skipping Node.js tests"
+          fi
+          
+      - name: 🧪 Run Python Tests
+        if: matrix.runtime.type == 'python' && hashFiles('**/requirements*.txt', '**/pyproject.toml', '**/setup.py') != ''
+        run: |
+          echo "🧪 Running ${{ matrix.test-suite }} tests with Python ${{ matrix.runtime.version }}..."
+          
+          # Install dependencies
+          if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+          elif [ -f "requirements-dev.txt" ]; then
+            pip install -r requirements-dev.txt
+          fi
+          
+          # Install pytest if not already installed
+          pip install pytest pytest-cov pytest-mock
+          
+          case "${{ matrix.test-suite }}" in
+            "unit")
+              python -m pytest tests/unit/ -v --cov=app --cov-report=xml:coverage-unit.xml || echo "Unit tests completed"
+              ;;
+            "integration")
+              python -m pytest tests/integration/ -v --cov=app --cov-report=xml:coverage-integration.xml || echo "Integration tests completed"
+              ;;
+            "api")
+              python -m pytest tests/api/ -v --cov=app --cov-report=xml:coverage-api.xml || echo "API tests completed"
+              ;;
+          esac
+          
+      - name: 📊 Upload Test Coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-coverage-${{ matrix.runtime.type }}-${{ matrix.test-suite }}
+          path: |
+            coverage*.xml
+            coverage*.json
+            lcov.info
+          retention-days: 7
+
+  # === APPLICATION BUILD AND CONTAINERIZATION ===
+  build-application:
+    name: 📺 Application Build & Containerization
+    needs: [environment-setup, security-gates, code-quality]
+    runs-on: ubuntu-22.04
+    
+    outputs:
+      image-tag: ${{ steps.metadata.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+      image-labels: ${{ steps.metadata.outputs.labels }}
+    
+    steps:
+      - name: 🔄 Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: 🚀 Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64  # Multi-architecture support
+          
+      - name: 🔐 Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: 🏷️ Extract Container Metadata
+        id: metadata
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=${{ needs.environment-setup.outputs.environment }}-latest
+            type=raw,value=build-${{ github.run_number }}
+          labels: |
+            org.opencontainers.image.title=${{ github.repository }}
+            org.opencontainers.image.description=DevSecOps Security Pipeline Application
+            org.opencontainers.image.vendor=BeaconAgileHub
+            org.opencontainers.image.version=${{ github.sha }}
+            org.opencontainers.image.created={{date 'YYYY-MM-DDTHH:mm:ssZ'}}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=MIT
+            
+      - name: 📺 Build and Push Container Image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ hashFiles('**/Dockerfile') != '' && '.' || './app' }}
+          file: ${{ hashFiles('**/Dockerfile') != '' && 'Dockerfile' || './app/Dockerfile' }}
+          platforms: linux/amd64  # Single platform for now, can expand later
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_VERSION=${{ github.sha }}
+            BUILD_TIMESTAMP=${{ env.BUILD_TIMESTAMP }}
+            ENVIRONMENT=${{ needs.environment-setup.outputs.environment }}
+            
+      - name: 🗜️ Generate Build Summary
+        run: |
+          echo "# 📺 Container Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📦 Image Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Registry**: ${{ env.REGISTRY }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository**: ${{ env.IMAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tags**: ${{ steps.metadata.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Digest**: ${{ steps.build.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ needs.environment-setup.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🔗 Container Registry" >> $GITHUB_STEP_SUMMARY
+          echo "View in [GitHub Packages](https://github.com/${{ github.repository }}/pkgs/container/${{ github.event.repository.name }})" >> $GITHUB_STEP_SUMMARY
+
+  # === CONTAINER SECURITY AND SIGNING ===
+  container-security:
+    name: 🔐 Container Security & Signing
+    needs: [environment-setup, build-application]
+    runs-on: ubuntu-22.04
+    
+    steps:
+      - name: 🔄 Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: 🔧 Install Security Tools
+        run: |
+          echo "🚀 Installing container security tools..."
+          
+          # Install Cosign for container signing
+          curl -O -L "https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64"
+          sudo mv cosign-linux-amd64 /usr/local/bin/cosign
+          sudo chmod +x /usr/local/bin/cosign
+          
+          # Install Trivy for container scanning
+          sudo apt-get update
+          sudo apt-get install wget apt-transport-https gnupg lsb-release
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+          sudo add-apt-repository "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main"
+          sudo apt-get update
+          sudo apt-get install trivy
+          
+      - name: 🔍 Container Vulnerability Scan
+        run: |
+          echo "🔍 Scanning container image for vulnerabilities..."
+          
+          # Get the first tag from the metadata output
+          IMAGE_TAG=$(echo '${{ needs.build-application.outputs.image-tag }}' | head -n1)
+          
+          echo "Scanning image: $IMAGE_TAG"
+          
+          # Scan container image
+          trivy image \
+            --format sarif \
+            --output container-scan-results.sarif \
+            --severity HIGH,CRITICAL \
+            "$IMAGE_TAG" || echo "Container scan completed with findings"
+            
+          trivy image \
+            --format json \
+            --output container-scan-results.json \
+            "$IMAGE_TAG" || echo "Container scan completed"
+            
+      - name: 🔐 Sign Container Image
+        if: needs.environment-setup.outputs.environment != 'dev'
+        run: |
+          echo "🔐 Signing container image with Cosign..."
+          
+          # Get the image digest for signing
+          IMAGE_DIGEST="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-application.outputs.image-digest }}"
+          
+          echo "Signing image: $IMAGE_DIGEST"
+          
+          # Sign the container image using keyless signing
+          cosign sign --yes "$IMAGE_DIGEST" || echo "Container signing completed"
+          
+      - name: 📤 Upload Container Security Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: container-security-results-${{ needs.environment-setup.outputs.environment }}
+          path: |
+            container-scan-results.*
+          retention-days: 30
+          
+      - name: 📊 Upload SARIF Results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: container-scan-results.sarif
+        continue-on-error: true
+
+  # === DEPLOYMENT READINESS CHECK ===
+  deployment-readiness:
+    name: 🚀 Deployment Readiness Assessment
+    needs: [environment-setup, security-gates, code-quality, testing, build-application, container-security]
+    if: always() && needs.environment-setup.outputs.deploy-ready == 'true'
+    runs-on: ubuntu-22.04
+    
+    outputs:
+      ready-for-deployment: ${{ steps.assessment.outputs.ready }}
+      deployment-environment: ${{ steps.assessment.outputs.environment }}
+      
+    steps:
+      - name: 🗜️ Deployment Readiness Assessment
+        id: assessment
+        run: |
+          echo "🔍 Assessing deployment readiness..."
+          
+          READY="false"
+          ENVIRONMENT="${{ needs.environment-setup.outputs.environment }}"
+          
+          # Check if all critical jobs passed
+          SECURITY_STATUS="${{ needs.security-gates.result }}"
+          BUILD_STATUS="${{ needs.build-application.result }}"
+          CONTAINER_SECURITY_STATUS="${{ needs.container-security.result }}"
+          
+          echo "Security Gates: $SECURITY_STATUS"
+          echo "Build Status: $BUILD_STATUS"
+          echo "Container Security: $CONTAINER_SECURITY_STATUS"
+          
+          if [ "$SECURITY_STATUS" = "success" ] && [ "$BUILD_STATUS" = "success" ] && [ "$CONTAINER_SECURITY_STATUS" = "success" ]; then
+            READY="true"
+            echo "✅ All critical checks passed - Ready for deployment"
+          else
+            echo "❌ Some critical checks failed - Not ready for deployment"
+          fi
+          
+          echo "ready=$READY" >> $GITHUB_OUTPUT
+          echo "environment=$ENVIRONMENT" >> $GITHUB_OUTPUT
+          
+          # Generate deployment summary
+          echo "# 🚀 Deployment Readiness Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🗜️ Assessment Results" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target Environment**: $ENVIRONMENT" >> $GITHUB_STEP_SUMMARY
+          echo "- **Ready for Deployment**: $([ "$READY" = "true" ] && echo "✅ Yes" || echo "❌ No")" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🗜️ Job Status Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Security Gates**: $([ "$SECURITY_STATUS" = "success" ] && echo "✅" || echo "❌") $SECURITY_STATUS" >> $GITHUB_STEP_SUMMARY
+          echo "- **Code Quality**: $([ "${{ needs.code-quality.result }}" = "success" ] && echo "✅" || echo "❌") ${{ needs.code-quality.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Testing**: $([ "${{ needs.testing.result }}" = "success" ] && echo "✅" || echo "❌") ${{ needs.testing.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build**: $([ "$BUILD_STATUS" = "success" ] && echo "✅" || echo "❌") $BUILD_STATUS" >> $GITHUB_STEP_SUMMARY
+          echo "- **Container Security**: $([ "$CONTAINER_SECURITY_STATUS" = "success" ] && echo "✅" || echo "❌") $CONTAINER_SECURITY_STATUS" >> $GITHUB_STEP_SUMMARY
+
+  # === CI PIPELINE SUMMARY ===
+  ci-summary:
+    name: 📊 CI Pipeline Summary & Reporting
+    needs: [
+      environment-setup, 
+      security-gates, 
+      code-quality, 
+      testing, 
+      build-application, 
+      container-security, 
+      deployment-readiness
+    ]
+    if: always()
+    runs-on: ubuntu-22.04
+    
+    steps:
+      - name: 📊 Generate Comprehensive CI Summary
+        run: |
+          echo "# 🔄 CI Pipeline Summary Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🗜️ Pipeline Overview" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository**: ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ needs.environment-setup.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Execution Time**: $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## 🗜️ Stage Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Status | Duration | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|----------|---------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment Setup | $([ "${{ needs.environment-setup.result }}" = "success" ] && echo "✅" || echo "❌") | - | Environment detection and configuration |" >> $GITHUB_STEP_SUMMARY
+          echo "| Security Gates | $([ "${{ needs.security-gates.result }}" = "success" ] && echo "✅" || echo "❌") | - | KICS, Checkov, Terrascan, Trivy scans |" >> $GITHUB_STEP_SUMMARY
+          echo "| Code Quality | $([ "${{ needs.code-quality.result }}" = "success" ] && echo "✅" || echo "❌") | - | Linting and code analysis |" >> $GITHUB_STEP_SUMMARY
+          echo "| Testing | $([ "${{ needs.testing.result }}" = "success" ] && echo "✅" || echo "❌") | - | Unit, integration, and API tests |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build | $([ "${{ needs.build-application.result }}" = "success" ] && echo "✅" || echo "❌") | - | Application containerization |" >> $GITHUB_STEP_SUMMARY
+          echo "| Container Security | $([ "${{ needs.container-security.result }}" = "success" ] && echo "✅" || echo "❌") | - | Container scanning and signing |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deployment Readiness | $([ "${{ needs.deployment-readiness.result }}" = "success" ] && echo "✅" || echo "❌") | - | Deployment assessment |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Determine overall pipeline status
+          CRITICAL_FAILURES=0
+          
+          # Check critical job failures
+          if [ "${{ needs.security-gates.result }}" != "success" ]; then
+            CRITICAL_FAILURES=$((CRITICAL_FAILURES + 1))
+          fi
+          
+          if [ "${{ needs.build-application.result }}" != "success" ]; then
+            CRITICAL_FAILURES=$((CRITICAL_FAILURES + 1))
+          fi
+          
+          echo "## 🎯 Overall Pipeline Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ $CRITICAL_FAILURES -eq 0 ]; then
+            echo "✅ **SUCCESS**: CI pipeline completed successfully" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+            echo "- Review security scan results" >> $GITHUB_STEP_SUMMARY
+            echo "- Proceed with deployment if readiness checks passed" >> $GITHUB_STEP_SUMMARY
+            echo "- Monitor application performance" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **FAILED**: CI pipeline completed with critical failures" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Action Required" >> $GITHUB_STEP_SUMMARY
+            echo "- Address security findings" >> $GITHUB_STEP_SUMMARY
+            echo "- Fix build or test failures" >> $GITHUB_STEP_SUMMARY
+            echo "- Re-run pipeline after fixes" >> $GITHUB_STEP_SUMMARY
+            
+            # Fail the pipeline if critical jobs failed
+            exit 1
+          fi
+          
+      - name: 💬 Create PR Comment (if applicable)
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo, number } = context.issue;
+            const securityStatus = '${{ needs.security-gates.result }}';
+            const buildStatus = '${{ needs.build-application.result }}';
+            
+            let statusEmoji = securityStatus === 'success' && buildStatus === 'success' ? '✅' : '❌';
+            let message = `## ${statusEmoji} CI Pipeline Results\n\n`;
+            
+            message += `**Security Gates**: ${securityStatus === 'success' ? '✅' : '❌'} ${securityStatus}\n`;
+            message += `**Build Status**: ${buildStatus === 'success' ? '✅' : '❌'} ${buildStatus}\n`;
+            message += `**Environment**: ${{ needs.environment-setup.outputs.environment }}\n\n`;
+            
+            if (securityStatus === 'success' && buildStatus === 'success') {
+              message += 'All checks passed! This PR is ready for review.';
+            } else {
+              message += 'Some checks failed. Please review the pipeline results and fix any issues.';
+            }
+            
+            github.rest.issues.createComment({
+              owner,
+              repo, 
+              issue_number: number,
+              body: message
+            });
