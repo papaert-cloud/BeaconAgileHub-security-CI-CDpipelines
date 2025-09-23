@@ -96,7 +96,28 @@ SSH_KEY_PATH="$HOME/.ssh/hostinger_vps_key"
 
 if [ ! -f "$SSH_KEY_PATH" ]; then
     echo "Generating SSH key pair..."
-    ssh-keygen -t ed25519 -b 4096 -f "$SSH_KEY_PATH" -C "github-actions@$ORG_NAME" -N ""
+    # Prompt for passphrase
+    while true; do
+        read -s -p "Enter passphrase for SSH key (leave blank for no passphrase): " SSH_KEY_PASSPHRASE
+        echo
+        read -s -p "Confirm passphrase: " SSH_KEY_PASSPHRASE_CONFIRM
+        echo
+        if [ "$SSH_KEY_PASSPHRASE" != "$SSH_KEY_PASSPHRASE_CONFIRM" ]; then
+            echo -e "${RED}Passphrases do not match. Please try again.${NC}"
+        else
+            break
+        fi
+    done
+    if [ -z "$SSH_KEY_PASSPHRASE" ]; then
+        echo -e "${YELLOW}Warning: You are creating an SSH key without a passphrase. This is NOT recommended for production environments.${NC}"
+        read -p "Are you sure you want to continue without a passphrase? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "SSH key generation cancelled."
+            exit 0
+        fi
+    fi
+    ssh-keygen -t ed25519 -b 4096 -f "$SSH_KEY_PATH" -C "github-actions@$ORG_NAME" -N "$SSH_KEY_PASSPHRASE"
     chmod 600 "$SSH_KEY_PATH"
     chmod 644 "$SSH_KEY_PATH.pub"
     print_status "success" "SSH key pair generated"
