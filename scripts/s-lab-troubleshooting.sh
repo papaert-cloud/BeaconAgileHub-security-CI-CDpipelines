@@ -301,12 +301,30 @@ validate_workflow_syntax() {
     if ! command -v yq >/dev/null 2>&1; then
         echo "Installing yq for YAML validation..."
         if command -v wget >/dev/null 2>&1; then
-            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 2>/dev/null || {
-                print_status "warning" "Could not install yq (requires sudo)"
+            YQ_VERSION="v4.43.1"
+            YQ_BIN_URL="https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+            YQ_SHA_URL="https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/checksums"
+            TMP_YQ="/tmp/yq_linux_amd64"
+            TMP_SHA="/tmp/yq_checksums"
+            wget -qO "$TMP_YQ" "$YQ_BIN_URL" 2>/dev/null || {
+                print_status "warning" "Could not download yq binary"
                 return 1
             }
+            wget -qO "$TMP_SHA" "$YQ_SHA_URL" 2>/dev/null || {
+                print_status "warning" "Could not download yq checksums"
+                rm -f "$TMP_YQ"
+                return 1
+            }
+            EXPECTED_SHA=$(grep "yq_linux_amd64" "$TMP_SHA" | awk '{print $1}')
+            ACTUAL_SHA=$(sha256sum "$TMP_YQ" | awk '{print $1}')
+            if [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
+                print_status "error" "yq checksum verification failed"
+                rm -f "$TMP_YQ" "$TMP_SHA"
+                return 1
+            fi
+            sudo mv "$TMP_YQ" /usr/local/bin/yq
             sudo chmod +x /usr/local/bin/yq 2>/dev/null || true
-        fi
+            rm -f "$TMP_SHA"
     fi
     
     # Validate all workflow files
