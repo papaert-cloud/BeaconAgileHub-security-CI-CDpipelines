@@ -66,7 +66,7 @@ jobs:
       plan-exitcode: ${{ steps.plan.outputs.exitcode }}
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -94,9 +94,9 @@ jobs:
         working-directory: terragrunt/environments/${{ inputs.environment }}
         run: |
           terragrunt plan -detailed-exitcode -out=tfplan --terragrunt-non-interactive
-          echo "exitcode=$?" >> $GITHUB_OUTPUT
+          echo "exitcode=$?" >> "${GITHUB_OUTPUT}"
         continue-on-error: true
-        
+
       - name: Security Scan Infrastructure
         run: |
           docker run --rm -v $(pwd):/workspace bridgecrew/checkov:2.5.24 -d /workspace/terragrunt --framework terraform --quiet
@@ -112,7 +112,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -136,4 +136,4 @@ jobs:
         
       - name: Post-Apply Validation
         run: |
-          echo "✅ Infrastructure deployment completed successfully" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Infrastructure deployment completed successfully" >> "${GITHUB_STEP_SUMMARY}"

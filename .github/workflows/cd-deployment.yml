@@ -1,4 +1,4 @@
-name: '🚀 CD Deployment Pipeline'
+name: 🚀 CD Deployment Pipeline
 
 on:
   workflow_call:
@@ -37,31 +37,33 @@ env:
 
 jobs:
   pre-deployment-validation:
-    name: 'Pre-deployment Security'
+    name: Pre-deployment Security
     runs-on: ubuntu-22.04
     outputs:
       security_passed: ${{ steps.security_scan.outputs.passed }}
     steps:
-    - uses: actions/checkout@v4
-    - name: Configure AWS Credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-        aws-region: ${{ env.AWS_REGION }}
-    - name: Container Security Scan
-      id: security_scan
-      run: |
-        curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin v${{ env.GRYPE_VERSION }}
-        if grype ${{ inputs.container_image }} --fail-on high --output json --file scan-results.json; then
-          echo "passed=true" >> $GITHUB_OUTPUT
-        else
-          echo "passed=false" >> $GITHUB_OUTPUT
-          echo "::error::Container security scan failed"
-          exit 1
-        fi
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Container Security Scan
+        id: security_scan
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin v${{ env.GRYPE_VERSION }}
+          if grype ${{ inputs.container_image }} --fail-on high --output json --file scan-results.json; then
+            echo "passed=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "passed=false" >> "${GITHUB_OUTPUT}"
+            echo "::error::Container security scan failed"
+            exit 1
+          fi
 
   deploy-eks:
-    name: 'Deploy to EKS'
+    name: Deploy to EKS
     runs-on: ubuntu-22.04
     needs: pre-deployment-validation
     if: ${{ inputs.deploy_to_eks && needs.pre-deployment-validation.outputs.security_passed == 'true' }}
@@ -69,125 +71,131 @@ jobs:
       application_url: ${{ steps.deploy.outputs.url }}
       deployment_successful: ${{ steps.deploy.outputs.success }}
     steps:
-    - uses: actions/checkout@v4
-    - name: Configure AWS Credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-        aws-region: ${{ env.AWS_REGION }}
-    - name: Setup kubectl
-      run: |
-        curl -LO "https://dl.k8s.io/release/${{ env.KUBECTL_VERSION }}/bin/linux/amd64/kubectl"
-        chmod +x kubectl
-        sudo mv kubectl /usr/local/bin/
-    - name: Configure kubectl
-      run: |
-        aws eks update-kubeconfig --name sbom-${{ inputs.environment }}-cluster --region ${{ env.AWS_REGION }} || echo "EKS cluster not found, using mock deployment"
-    - name: Deploy to EKS
-      id: deploy
-      run: |
-        cat > deployment.yaml <<EOF
-        apiVersion: apps/v1
-        kind: Deployment
-        metadata:
-          name: ${{ inputs.application_name }}
-          namespace: ${{ inputs.application_name }}-${{ inputs.environment }}
-        spec:
-          replicas: 2
-          selector:
-            matchLabels:
-              app: ${{ inputs.application_name }}
-          template:
-            metadata:
-              labels:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Setup kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/${{ env.KUBECTL_VERSION }}/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+      
+      - name: Configure kubectl
+        run: |
+          aws eks update-kubeconfig --name sbom-${{ inputs.environment }}-cluster --region ${{ env.AWS_REGION }} || echo "EKS cluster not found, using mock deployment"
+      
+      - name: Deploy to EKS
+        id: deploy
+        run: |
+          cat > deployment.yaml <<EOF
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: ${{ inputs.application_name }}
+            namespace: ${{ inputs.application_name }}-${{ inputs.environment }}
+          spec:
+            replicas: 2
+            selector:
+              matchLabels:
                 app: ${{ inputs.application_name }}
-            spec:
-              securityContext:
-                runAsNonRoot: true
-                runAsUser: 1000
-              containers:
-              - name: app
-                image: ${{ inputs.container_image }}
-                ports:
-                - containerPort: 8080
+            template:
+              metadata:
+                labels:
+                  app: ${{ inputs.application_name }}
+              spec:
                 securityContext:
-                  allowPrivilegeEscalation: false
-                  readOnlyRootFilesystem: true
-                  capabilities:
-                    drop: [ALL]
-                resources:
-                  requests:
-                    memory: "256Mi"
-                    cpu: "250m"
-                  limits:
-                    memory: "512Mi"
-                    cpu: "500m"
-        ---
-        apiVersion: v1
-        kind: Service
-        metadata:
-          name: ${{ inputs.application_name }}-service
-          namespace: ${{ inputs.application_name }}-${{ inputs.environment }}
-        spec:
-          selector:
-            app: ${{ inputs.application_name }}
-          ports:
-          - port: 80
-            targetPort: 8080
-        EOF
-        
-        kubectl create namespace ${{ inputs.application_name }}-${{ inputs.environment }} --dry-run=client -o yaml | kubectl apply -f -
-        kubectl apply -f deployment.yaml
-        kubectl wait --for=condition=available deployment/${{ inputs.application_name }} -n ${{ inputs.application_name }}-${{ inputs.environment }} --timeout=300s
-        
-        echo "url=http://${{ inputs.application_name }}-${{ inputs.environment }}.local" >> $GITHUB_OUTPUT
-        echo "success=true" >> $GITHUB_OUTPUT
+                  runAsNonRoot: true
+                  runAsUser: 1000
+                containers:
+                - name: app
+                  image: ${{ inputs.container_image }}
+                  ports:
+                  - containerPort: 8080
+                  securityContext:
+                    allowPrivilegeEscalation: false
+                    readOnlyRootFilesystem: true
+                    capabilities:
+                      drop: [ALL]
+                  resources:
+                    requests:
+                      memory: "256Mi"
+                      cpu: "250m"
+                    limits:
+                      memory: "512Mi"
+                      cpu: "500m"
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: ${{ inputs.application_name }}-service
+            namespace: ${{ inputs.application_name }}-${{ inputs.environment }}
+          spec:
+            selector:
+              app: ${{ inputs.application_name }}
+            ports:
+            - port: 80
+              targetPort: 8080
+          EOF
+
+          kubectl create namespace ${{ inputs.application_name }}-${{ inputs.environment }} --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply -f deployment.yaml
+          kubectl wait --for=condition=available deployment/${{ inputs.application_name }} -n ${{ inputs.application_name }}-${{ inputs.environment }} --timeout=300s
+
+          echo "url=http://${{ inputs.application_name }}-${{ inputs.environment }}.local" >> "${GITHUB_OUTPUT}"
+          echo "success=true" >> "${GITHUB_OUTPUT}"
 
   dast-testing:
-    name: 'DAST Security Testing'
+    name: DAST Security Testing
     runs-on: ubuntu-22.04
     needs: deploy-eks
     if: ${{ inputs.enable_dast_testing && needs.deploy-eks.outputs.deployment_successful == 'true' }}
     outputs:
       security_passed: ${{ steps.dast.outputs.passed }}
     steps:
-    - uses: actions/checkout@v4
-    - name: OWASP ZAP Scan
-      id: dast
-      uses: zaproxy/action-baseline@v0.12.0
-      with:
-        target: ${{ needs.deploy-eks.outputs.application_url }}
-        rules_file_name: '.zap/rules.tsv'
-        cmd_options: '-a -d -T 60'
-      continue-on-error: true
-    - name: Process Results
-      run: |
-        echo "passed=true" >> $GITHUB_OUTPUT
+      - uses: actions/checkout@v4
+      
+      - name: OWASP ZAP Scan
+        id: dast
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: ${{ needs.deploy-eks.outputs.application_url }}
+          rules_file_name: '.zap/rules.tsv'
+          cmd_options: '-a -d -T 60'
+        continue-on-error: true
+      
+      - name: Process Results
+        run: |
+          echo "passed=true" >> "${GITHUB_OUTPUT}"
 
   deployment-summary:
-    name: 'Deployment Summary'
+    name: Deployment Summary
     runs-on: ubuntu-22.04
     needs: [pre-deployment-validation, deploy-eks, dast-testing]
     if: always()
     outputs:
       success: ${{ steps.summary.outputs.success }}
     steps:
-    - name: Summary
-      id: summary
-      run: |
-        PRE_VALIDATION="${{ needs.pre-deployment-validation.outputs.security_passed }}"
-        EKS_DEPLOYMENT="${{ needs.deploy-eks.outputs.deployment_successful }}"
-        DAST_PASSED="${{ needs.dast-testing.outputs.security_passed }}"
-        
-        echo "# 📊 Deployment Summary" >> $GITHUB_STEP_SUMMARY
-        echo "- Pre-validation: $PRE_VALIDATION" >> $GITHUB_STEP_SUMMARY
-        echo "- EKS Deployment: $EKS_DEPLOYMENT" >> $GITHUB_STEP_SUMMARY
-        echo "- DAST Testing: $DAST_PASSED" >> $GITHUB_STEP_SUMMARY
-        
-        if [[ "$PRE_VALIDATION" == "true" && "$EKS_DEPLOYMENT" == "true" && "$DAST_PASSED" == "true" ]]; then
-          echo "success=true" >> $GITHUB_OUTPUT
-          echo "✅ Deployment successful" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "success=false" >> $GITHUB_OUTPUT
-          echo "❌ Deployment failed" >> $GITHUB_STEP_SUMMARY
-        fi
+      - name: Summary
+        id: summary
+        run: |
+          PRE_VALIDATION="${{ needs.pre-deployment-validation.outputs.security_passed }}"
+          EKS_DEPLOYMENT="${{ needs.deploy-eks.outputs.deployment_successful }}"
+          DAST_PASSED="${{ needs.dast-testing.outputs.security_passed }}"
+
+          echo "# 📊 Deployment Summary" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Pre-validation: $PRE_VALIDATION" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- EKS Deployment: $EKS_DEPLOYMENT" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- DAST Testing: $DAST_PASSED" >> "${GITHUB_STEP_SUMMARY}"
+          
+          if [[ "$PRE_VALIDATION" == "true" && "$EKS_DEPLOYMENT" == "true" && "$DAST_PASSED" == "true" ]]; then
+            echo "success=true" >> "${GITHUB_OUTPUT}"
+            echo "✅ Deployment successful" >> "${GITHUB_STEP_SUMMARY}"
+          else
+            echo "success=false" >> "${GITHUB_OUTPUT}"
+            echo "❌ Deployment failed" >> "${GITHUB_STEP_SUMMARY}"
+          fi

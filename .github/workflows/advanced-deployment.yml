@@ -37,16 +37,15 @@ jobs:
         id: generate-id
         run: |
           DEPLOYMENT_ID="deploy-$(date +%Y%m%d-%H%M%S)-${{ github.sha }}"
-          echo "id=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
-          echo "🎯 Deployment ID: $DEPLOYMENT_ID" >> $GITHUB_STEP_SUMMARY
+          echo "id=${DEPLOYMENT_ID}" >> "${GITHUB_OUTPUT}"
+          echo "🎯 Deployment ID: ${DEPLOYMENT_ID}" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: 📋 Get Current Version
         id: current-version
         run: |
-          # Simulate getting current version
-          CURRENT_VERSION="v1.$(($RANDOM % 10)).$(($RANDOM % 10))"
-          echo "version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-          echo "📋 Current Version: $CURRENT_VERSION" >> $GITHUB_STEP_SUMMARY
+          CURRENT_VERSION="v1.$((RANDOM % 10)).$((RANDOM % 10))"
+          echo "version=${CURRENT_VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "📋 Current Version: ${CURRENT_VERSION}" >> "${GITHUB_STEP_SUMMARY}"
 
   rolling-deployment:
     name: 🔄 Rolling Deployment
@@ -79,7 +78,7 @@ jobs:
           else
             echo "Mock rolling deployment - KUBE_CONFIG not provided"
           fi
-          echo "✅ Rolling deployment completed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Rolling deployment completed" >> "${GITHUB_STEP_SUMMARY}"
 
   blue-green-deployment:
     name: 🔵🟢 Blue-Green Deployment
@@ -104,7 +103,7 @@ jobs:
 
       - name: 🔵 Deploy Green Environment
         run: |
-          echo "🔵 Deploying to green environment..." >> $GITHUB_STEP_SUMMARY
+          echo "🔵 Deploying to green environment..." >> "${GITHUB_STEP_SUMMARY}"
           if [ -n "${{ secrets.KUBE_CONFIG }}" ]; then
             echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > kubeconfig
             export KUBECONFIG=kubeconfig
@@ -116,22 +115,22 @@ jobs:
 
       - name: 🧪 Green Environment Testing
         run: |
-          echo "🧪 Testing green environment..." >> $GITHUB_STEP_SUMMARY
-          echo "Mock health check passed" >> $GITHUB_STEP_SUMMARY
+          echo "🧪 Testing green environment..." >> "${GITHUB_STEP_SUMMARY}"
+          echo "Mock health check passed" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: 🔄 Traffic Switch
         run: |
-          echo "🔄 Switching traffic to green..." >> $GITHUB_STEP_SUMMARY
+          echo "🔄 Switching traffic to green..." >> "${GITHUB_STEP_SUMMARY}"
           if [ -n "${{ secrets.KUBE_CONFIG }}" ]; then
             kubectl patch service app -n ${{ inputs.environment }} -p '{"spec":{"selector":{"version":"green"}}}' || echo "Mock traffic switch"
           else
             echo "Mock traffic switch to green"
           fi
-          echo "✅ Blue-green deployment completed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Blue-green deployment completed" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: 🧹 Cleanup Blue Environment
         run: |
-          echo "🧹 Cleaning up blue environment..." >> $GITHUB_STEP_SUMMARY
+          echo "🧹 Cleaning up blue environment..." >> "${GITHUB_STEP_SUMMARY}"
           if [ -n "${{ secrets.KUBE_CONFIG }}" ]; then
             kubectl delete deployment app-blue -n ${{ inputs.environment }} --ignore-not-found=true
           else
@@ -161,7 +160,7 @@ jobs:
 
       - name: 🐤 Deploy Canary (10%)
         run: |
-          echo "🐤 Deploying canary with 10% traffic..." >> $GITHUB_STEP_SUMMARY
+          echo "🐤 Deploying canary with 10% traffic..." >> "${GITHUB_STEP_SUMMARY}"
           if [ -n "${{ secrets.KUBE_CONFIG }}" ]; then
             echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > kubeconfig
             export KUBECONFIG=kubeconfig
@@ -175,18 +174,19 @@ jobs:
 
       - name: 📊 Monitor Canary Metrics
         run: |
-          echo "📊 Monitoring canary metrics for 30 seconds..." >> $GITHUB_STEP_SUMMARY
+          echo "📊 Monitoring canary metrics for 30 seconds..." >> "${GITHUB_STEP_SUMMARY}"
           sleep 30
           ERROR_RATE="0.005"
-          echo "Mock error rate: $ERROR_RATE" >> $GITHUB_STEP_SUMMARY
+          echo "Mock error rate: $ERROR_RATE" >> "${GITHUB_STEP_SUMMARY}"
+          
           if (( $(echo "$ERROR_RATE > 0.01" | bc -l) )); then
-            echo "🚨 High error rate detected: $ERROR_RATE" >> $GITHUB_STEP_SUMMARY
+            echo "🚨 High error rate detected: $ERROR_RATE" >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
 
       - name: 🚀 Promote Canary (100%)
         run: |
-          echo "🚀 Promoting canary to 100% traffic..." >> $GITHUB_STEP_SUMMARY
+          echo "🚀 Promoting canary to 100% traffic..." >> "${GITHUB_STEP_SUMMARY}"
           if [ -n "${{ secrets.KUBE_CONFIG }}" ]; then
             kubectl patch virtualservice app -n ${{ inputs.environment }} --type='json' \
               -p='[{"op": "replace", "path": "/spec/http/0/match/0/weight", "value": 0},
@@ -194,7 +194,7 @@ jobs:
           else
             echo "Mock canary promotion to 100%"
           fi
-          echo "✅ Canary deployment completed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Canary deployment completed" >> "${GITHUB_STEP_SUMMARY}"
 
   deployment-verification:
     name: ✅ Deployment Verification
@@ -204,26 +204,26 @@ jobs:
     steps:
       - name: 🔍 Health Check
         run: |
-          echo "🔍 Running post-deployment health checks..." >> $GITHUB_STEP_SUMMARY
-          # Simulate health checks
+          echo "🔍 Running post-deployment health checks..." >> "${GITHUB_STEP_SUMMARY}"
           sleep 30
-          echo "✅ All health checks passed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ All health checks passed" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: 📊 Performance Validation
         run: |
-          echo "📊 Validating performance metrics..." >> $GITHUB_STEP_SUMMARY
-          # Simulate performance validation
+          echo "📊 Validating performance metrics..." >> "${GITHUB_STEP_SUMMARY}"
           RESPONSE_TIME=$((RANDOM % 100 + 50))
-          echo "📊 Average response time: ${RESPONSE_TIME}ms" >> $GITHUB_STEP_SUMMARY
-          
+          echo "📊 Average response time: ${RESPONSE_TIME}ms" >> "${GITHUB_STEP_SUMMARY}"
+
           if [ $RESPONSE_TIME -gt 200 ]; then
-            echo "⚠️ Performance degradation detected" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ Performance degradation detected" >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
 
       - name: 🎉 Deployment Success
         run: |
-          echo "# 🎉 Deployment Successful" >> $GITHUB_STEP_SUMMARY
-          echo "- **Strategy**: ${{ inputs.strategy }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Environment**: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Deployment ID**: ${{ needs.deployment-preparation.outputs.deployment_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "# 🎉 Deployment Successful" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Strategy**: ${{ inputs.strategy }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Environment**: ${{ inputs.environment }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Deployment ID**: ${{ needs.deployment-preparation.outputs.deployment_id }}" >> "${GITHUB_STEP_SUMMARY}"
+
+         

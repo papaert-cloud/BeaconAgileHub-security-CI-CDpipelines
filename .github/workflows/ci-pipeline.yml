@@ -2,9 +2,9 @@ name: 🔄 CI Pipeline - Development Integration
 
 on:
   push:
-    branches: [ main, develop, feature/* ]
+    branches: [main, develop, feature/*]
   pull_request:
-    branches: [ main, develop ]
+    branches: [main, develop]
 
 env:
   REGISTRY: ghcr.io
@@ -24,11 +24,11 @@ jobs:
       - id: env
         run: |
           if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            echo "environment=production" >> $GITHUB_OUTPUT
+            echo "environment=production" >> "${GITHUB_OUTPUT}"
           elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
-            echo "environment=staging" >> $GITHUB_OUTPUT
+            echo "environment=staging" >> "${GITHUB_OUTPUT}"
           else
-            echo "environment=dev" >> $GITHUB_OUTPUT
+            echo "environment=dev" >> "${GITHUB_OUTPUT}"
           fi
 
   security-gates:
@@ -53,21 +53,21 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Configure AWS Credentials
         if: secrets.AWS_ROLE_ARN != ''
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
-          
+
       - name: Log in to Container Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-          
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -77,7 +77,7 @@ jobs:
             type=ref,event=branch
             type=ref,event=pr
             type=sha,prefix={{branch}}-
-            
+
       - name: Build and push Docker image
         id: build
         uses: docker/build-push-action@v5
@@ -86,28 +86,31 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          
+
       - name: Install Cosign
         uses: sigstore/cosign-installer@v3
         with:
           cosign-release: v${{ env.COSIGN_VERSION }}
-        
+
       - name: Sign container image
         run: |
-          cosign sign --yes ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
-          
+          cosign sign --yes \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+
       - name: Install Syft and Grype
         run: |
           curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin v${{ env.SYFT_VERSION }}
           curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin v${{ env.GRYPE_VERSION }}
-          
+
       - name: Generate SBOM for container
         run: |
-          syft ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }} -o cyclonedx-json=container-sbom.json
-          
+          syft ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }} \
+            -o cyclonedx-json=container-sbom.json
+
       - name: Container Security Scan
         run: |
-          grype ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }} -o json --file container-vulnerabilities.json
+          grype ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }} \
+            -o json --file container-vulnerabilities.json
 
   ics-security-validation:
     name: ICS Security Validation
@@ -115,13 +118,13 @@ jobs:
     needs: [determine-environment, build-and-test]
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup kubectl
         run: |
           curl -LO "https://dl.k8s.io/release/v1.28.4/bin/linux/amd64/kubectl"
           chmod +x kubectl
           sudo mv kubectl /usr/local/bin/
-      
+
       - name: Network Security Validation
         run: |
           if [ -f "kubernetes/policies/network-policies.yaml" ]; then
@@ -129,11 +132,11 @@ jobs:
           else
             echo "Network policies validated (mock)"
           fi
-          
+
       - name: Endpoint Security Check
         run: |
           docker run --rm -v $(pwd):/workspace aquasec/trivy:${{ env.TRIVY_VERSION }} image --security-checks vuln,config ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} || echo "Container security check completed"
-          
+
       - name: Application Security Gates
         run: |
           docker run -v $(pwd):/zap/wrk/:rw -t ghcr.io/zaproxy/zaproxy:stable zap-baseline.py -t http://localhost:8080 -J zap-report.json || echo "DAST scan completed"

@@ -25,27 +25,32 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      
       - name: Mock SLSA Provenance
         run: |
-          echo "SLSA Level 3 provenance generated (mock)" >> $GITHUB_STEP_SUMMARY
+          echo "SLSA Level 3 provenance generated (mock)" >> "${GITHUB_STEP_SUMMARY}"
           echo '{"slsa_level": 3, "verified": true}' > slsa-provenance.json
+      
       - name: Mock Build Integrity
         run: |
-          echo "Build integrity verified (mock)" >> $GITHUB_STEP_SUMMARY
+          echo "Build integrity verified (mock)" >> "${GITHUB_STEP_SUMMARY}"
 
   cis-benchmark:
     name: CIS Benchmark Validation
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      
       - name: Docker CIS Benchmark
         run: |
           docker run --rm -v $(pwd):/workspace aquasec/trivy:${{ env.TRIVY_VERSION }} config /workspace --format json --output cis-results.json || echo "CIS benchmark completed"
+      
       - name: Setup kubectl
         run: |
           curl -LO "https://dl.k8s.io/release/${{ env.KUBECTL_VERSION }}/bin/linux/amd64/kubectl"
           chmod +x kubectl
           sudo mv kubectl /usr/local/bin/
+      
       - name: Kubernetes CIS Benchmark
         run: |
           if [ -d "kubernetes/policies/" ]; then
@@ -59,12 +64,15 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
+      
       - name: Terraform Format Check
         run: terraform fmt -check -recursive terraform/ || echo "Terraform format check completed"
+      
       - name: Network Security Validation
         run: |
           if [ -d "terraform/modules/network-security/" ]; then
@@ -75,6 +83,7 @@ jobs:
           else
             echo "Network security module validation complete (mock)"
           fi
+      
       - name: Endpoint Security Check
         run: |
           if [ -f "app/Dockerfile" ]; then
@@ -82,7 +91,8 @@ jobs:
           else
             echo "No Dockerfile found, endpoint security check complete (mock)"
           fi
+      
       - name: Generate Compliance Report
         run: |
           echo '{"ics_compliance": "validated", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'", "environment": "${{ inputs.environment }}"}' > ics-compliance.json
-          echo "ICS compliance report generated" >> $GITHUB_STEP_SUMMARY
+          echo "ICS compliance report generated" >> "${GITHUB_STEP_SUMMARY}"

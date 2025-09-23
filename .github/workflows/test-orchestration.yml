@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: 🎯 Environment Detection Test
         run: |
           echo "🎯 Testing environment detection logic..."
@@ -61,7 +61,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: 🔍 Security Scan Simulation
         run: |
           echo "🔍 Simulating security scans..."
@@ -82,7 +82,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: 📊 Compliance Framework Test
         run: |
           echo "📊 Testing compliance framework selection..."
@@ -111,16 +111,16 @@ jobs:
     steps:
       - name: 📊 Generate Test Summary
         run: |
-          echo "# 🧪 Orchestration Test Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 📋 Test Results" >> $GITHUB_STEP_SUMMARY
-          echo "| Test Type | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Basic Logic | ${{ needs.test-basic.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Security Logic | ${{ needs.test-security.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Compliance Logic | ${{ needs.test-compliance.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 🎯 Next Steps" >> $GITHUB_STEP_SUMMARY
-          echo "1. Set up AWS OIDC and repository secrets" >> $GITHUB_STEP_SUMMARY
-          echo "2. Test the full enterprise orchestrator" >> $GITHUB_STEP_SUMMARY
-          echo "3. Trigger CI/CD pipeline with a code push" >> $GITHUB_STEP_SUMMARY
+          echo "# 🧪 Orchestration Test Results" >> "${GITHUB_STEP_SUMMARY}"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "## 📋 Test Results" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Test Type | Status |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "|-----------|--------|" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Basic Logic | ${{ needs.test-basic.result || 'skipped' }} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Security Logic | ${{ needs.test-security.result || 'skipped' }} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Compliance Logic | ${{ needs.test-compliance.result || 'skipped' }} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "## 🎯 Next Steps" >> "${GITHUB_STEP_SUMMARY}"
+          echo "1. Set up AWS OIDC and repository secrets" >> "${GITHUB_STEP_SUMMARY}"
+          echo "2. Test the full enterprise orchestrator" >> "${GITHUB_STEP_SUMMARY}"
+          echo "3. Trigger CI/CD pipeline with a code push" >> "${GITHUB_STEP_SUMMARY}"
