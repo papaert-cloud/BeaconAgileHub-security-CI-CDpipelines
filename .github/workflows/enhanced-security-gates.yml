@@ -132,7 +132,26 @@ jobs:
         run: |
           echo "🚀 Setting up KICS v${{ env.KICS_VERSION }}..."
           # Download and install KICS binary
-          curl -sfL "https://github.com/Checkmarx/kics/releases/download/v${{ env.KICS_VERSION }}/kics_${{ env.KICS_VERSION }}_linux_x64.tar.gz" | tar -xzC /tmp
+          KICS_URL="https://github.com/Checkmarx/kics/releases/download/v${{ env.KICS_VERSION }}/kics_${{ env.KICS_VERSION }}_linux_x64.tar.gz"
+          KICS_SHA256_URL="${KICS_URL}.sha256"
+          KICS_TARBALL="/tmp/kics_${{ env.KICS_VERSION }}_linux_x64.tar.gz"
+          KICS_SHA256_FILE="${KICS_TARBALL}.sha256"
+          echo "⬇️ Downloading KICS tarball and SHA256 checksum..."
+          curl -sfL "$KICS_URL" -o "$KICS_TARBALL"
+          curl -sfL "$KICS_SHA256_URL" -o "$KICS_SHA256_FILE"
+          echo "🔑 Verifying KICS tarball checksum..."
+          # The .sha256 file may contain just the hash or hash + filename; handle both
+          if grep -q ' ' "$KICS_SHA256_FILE"; then
+            sha256sum -c "$KICS_SHA256_FILE"
+          else
+            echo "$(cat "$KICS_SHA256_FILE")  $KICS_TARBALL" | sha256sum -c -
+          fi
+          if [ $? -ne 0 ]; then
+            echo "❌ Checksum verification failed! Aborting KICS installation."
+            exit 1
+          fi
+          echo "✅ Checksum verified. Extracting KICS..."
+          tar -xzC /tmp -f "$KICS_TARBALL"
           sudo mv /tmp/kics /usr/local/bin/
           sudo chmod +x /usr/local/bin/kics
           
