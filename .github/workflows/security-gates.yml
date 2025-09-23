@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Configure AWS Credentials
-        if: secrets.AWS_ROLE_ARN != ''
+        if: ${{ secrets.AWS_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
@@ -58,7 +58,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Snyk Security Scan
-        if: secrets.SNYK_TOKEN != ''
+        if: ${{ secrets.SNYK_TOKEN != '' }}
         uses: snyk/actions/node@0.4.0
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
@@ -66,7 +66,7 @@ jobs:
           args: --severity-threshold=${{ inputs.severity_threshold }}
       
       - name: Mock SCA Scan
-        if: secrets.SNYK_TOKEN == ''
+        if: ${{ secrets.SNYK_TOKEN == '' }}
         run: echo "SCA scan completed (mock - no Snyk token provided)"
 
   sbom-generation:
@@ -93,7 +93,7 @@ jobs:
           grype sbom:sbom.json -o json --file vulnerability-report.json || echo "Vulnerability scan completed"
 
       - name: Upload SBOM to AWS
-        if: secrets.AWS_ROLE_ARN != ''
+        if: ${{ secrets.AWS_ROLE_ARN != '' }}
         run: |
           aws s3 cp sbom.json s3://sbom-artifacts-${{ inputs.environment }}/$(date +%Y%m%d)/ || echo "SBOM upload completed (mock)"
           aws s3 cp vulnerability-report.json s3://sbom-artifacts-${{ inputs.environment }}/$(date +%Y%m%d)/ || echo "Vulnerability report upload completed (mock)"
