@@ -1,0 +1,218 @@
+---
+# ⚡ EDA Stack Deployment Playbook for VPS
+# Deploys complete Event-Driven Automation stack with N8N AI integration
+
+- name: "⚡ Deploy Complete EDA Stack to VPS"
+  hosts: localhost
+  connection: local
+  become: yes
+  gather_facts: yes
+  
+  vars:
+    vps_host: "148.230.94.85"
+    eda_base_path: "/opt/eda"
+    n8n_base_path: "/opt/n8n"
+    docker_network: "eda-network"
+    
+    # EDA Configuration
+    eda_config:
+      webhook_port: 5000
+      api_port: 5001
+      admin_port: 5002
+      redis_port: 6379
+      postgres_port: 5432
+      
+    # N8N Configuration  
+    n8n_config:
+      port: 5678
+      webhook_url: "http://{{ vps_host }}:5678"
+      encryption_key: "{{ lookup('env', 'N8N_ENCRYPTION_KEY') | default('generate-secure-key-here', true) }}"
+      
+    # OpenAI Integration
+    openai_config:
+      api_key: "{{ lookup('env', 'OPENAI_API_KEY') | default('', true) }}"
+      model: "gpt-4o"
+      max_tokens: 4000
+      
+    # Security Configuration
+    security_config:
+      enable_auth: true
+      jwt_secret: "{{ lookup('env', 'EDA_JWT_SECRET') | default('generate-jwt-secret-here', true) }}"
+      allowed_origins:
+        - "https://github.com"
+        - "http://{{ vps_host }}:3000"  # Grafana
+        - "http://{{ vps_host }}:9091"  # Prometheus
+  
+  tasks:
+    - name: "📊 Display VPS Information"
+      debug:
+        msg: |
+          Deploying EDA Stack to VPS: {{ vps_host }}
+          EDA Base Path: {{ eda_base_path }}
+          N8N Base Path: {{ n8n_base_path }}
+          Docker Network: {{ docker_network }}
+          
+    - name: "📦 Create EDA Directory Structure"
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ eda_base_path }}"
+        - "{{ eda_base_path }}/rulebooks"
+        - "{{ eda_base_path }}/playbooks"
+        - "{{ eda_base_path }}/inventory"
+        - "{{ eda_base_path }}/configs"
+        - "{{ eda_base_path }}/logs"
+        - "{{ eda_base_path }}/data/redis"
+        - "{{ eda_base_path }}/data/postgres"
+        - "{{ n8n_base_path }}"
+        - "{{ n8n_base_path }}/data"
+        - "{{ n8n_base_path }}/workflows"
+        
+    - name: "🌐 Create Docker Network"
+      docker_network:
+        name: "{{ docker_network }}"
+        driver: bridge
+        ipam_config:
+          - subnet: "172.20.0.0/24"
+            gateway: "172.20.0.1"
+            
+    - name: "📝 Generate EDA Configuration Files"
+      template:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        mode: "{{ item.mode | default('0644') }}"
+      loop:
+        - src: "eda-config.yml.j2"
+          dest: "{{ eda_base_path }}/configs/eda-config.yml"
+        - src: "redis.conf.j2"
+          dest: "{{ eda_base_path }}/configs/redis.conf"
+        - src: "postgres-init.sql.j2"
+          dest: "{{ eda_base_path }}/configs/postgres-init.sql"
+          
+    - name: "🚀 Generate Docker Compose for EDA Stack"
+      template:
+        src: "docker-compose-eda.yml.j2"
+        dest: "{{ eda_base_path }}/docker-compose.yml"
+        mode: '0644'
+        
+    - name: "🎆 Generate N8N Docker Compose"
+      template:
+        src: "docker-compose-n8n.yml.j2"
+        dest: "{{ n8n_base_path }}/docker-compose.yml"
+        mode: '0644'
+        
+    - name: "🛡️ Generate Security Rulebooks"
+      template:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        mode: '0644'
+      loop:
+        - src: "security-automation.yml.j2"
+          dest: "{{ eda_base_path }}/rulebooks/security-automation.yml"
+        - src: "github-webhook-handler.yml.j2"
+          dest: "{{ eda_base_path }}/rulebooks/github-webhook-handler.yml"
+        - src: "ai-security-response.yml.j2"
+          dest: "{{ eda_base_path }}/rulebooks/ai-security-response.yml"
+          
+    - name: "🤖 Generate AI Response Playbooks"
+      template:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        mode: '0755'
+      loop:
+        - src: "critical-incident-response.yml.j2"
+          dest: "{{ eda_base_path }}/playbooks/critical-incident-response.yml"
+        - src: "security-analysis-ai.yml.j2"
+          dest: "{{ eda_base_path }}/playbooks/security-analysis-ai.yml"
+        - src: "automated-remediation.yml.j2"
+          dest: "{{ eda_base_path }}/playbooks/automated-remediation.yml"
+          
+    - name: "🔄 Start EDA Stack Services"
+      community.docker.docker_compose:
+        project_src: "{{ eda_base_path }}"
+        state: present
+        pull: true
+        build: false
+        
+    - name: "🎆 Start N8N AI Service"
+      community.docker.docker_compose:
+        project_src: "{{ n8n_base_path }}"
+        state: present
+        pull: true
+        
+    - name: "⏳ Wait for Services to Start"
+      wait_for:
+        host: "{{ vps_host }}"
+        port: "{{ item }}"
+        delay: 10
+        timeout: 60
+      loop:
+        - 5000  # EDA Webhook
+        - 5001  # EDA API
+        - 5678  # N8N
+        - 6379  # Redis
+        
+    - name: "✅ Validate EDA Stack Health"
+      uri:
+        url: "http://{{ vps_host }}:{{ item.port }}{{ item.path }}"
+        method: GET
+        timeout: 10
+        status_code: [200, 401]  # 401 is OK for secured endpoints
+      loop:
+        - { port: 5000, path: "/health" }
+        - { port: 5001, path: "/api/health" }
+        - { port: 5678, path: "/healthz" }
+      register: health_checks
+      
+    - name: "📊 Display Service Status"
+      debug:
+        msg: |
+          EDA Stack Deployment Status:
+          ============================
+          
+          ⚡ EDA Webhook: http://{{ vps_host }}:5000
+          ⚡ EDA API: http://{{ vps_host }}:5001
+          🤖 N8N Interface: http://{{ vps_host }}:5678
+          📊 Redis: {{ vps_host }}:6379
+          📋 PostgreSQL: {{ vps_host }}:5432
+          
+          🔗 Integration URLs:
+          - Security Alerts: http://{{ vps_host }}:5000/security-alert
+          - AI Analysis: http://{{ vps_host }}:5001/ai-security-response
+          - N8N Webhooks: http://{{ vps_host }}:5678/webhook/*
+          
+          ✅ All services deployed and accessible!
+          
+    - name: "📡 Test EDA Integration"
+      uri:
+        url: "http://{{ vps_host }}:5000/security-alert"
+        method: POST
+        headers:
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          severity: "info"
+          summary: "EDA deployment validation test"
+          source: "ansible-deployment"
+          environment: "{{ ansible_env.USER | default('deployment') }}"
+          timestamp: "{{ ansible_date_time.iso8601 }}"
+        status_code: [200, 201, 202]
+      register: eda_test
+      
+    - name: "✅ EDA Integration Test Result"
+      debug:
+        msg: |
+          🎉 EDA Integration Test: {{ 'SUCCESS' if eda_test.status == 200 or eda_test.status == 201 or eda_test.status == 202 else 'FAILED' }}
+          Status Code: {{ eda_test.status }}
+          Response: {{ eda_test.json | default('N/A') }}
+          
+          ⚡ EDA Stack is operational and ready for GitHub Actions integration!
+          🔗 Use: http://{{ vps_host }}:5000/security-alert for webhook notifications
+          
+  handlers:
+    - name: "restart eda services"
+      community.docker.docker_compose:
+        project_src: "{{ eda_base_path }}"
+        restarted: true
