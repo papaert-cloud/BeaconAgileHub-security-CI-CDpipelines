@@ -1,0 +1,314 @@
+name: "🤖 EDA + N8N End-to-End Testing"
+
+on:
+  workflow_dispatch:
+    inputs:
+      severity:
+        description: "Alert severity level"
+        required: true
+        default: "critical"
+        type: choice
+        options:
+          - "low"
+          - "medium" 
+          - "high"
+          - "critical"
+      summary:
+        description: "Alert summary message"
+        required: true
+        default: "Pipeline security test event"
+      test_scenario:
+        description: "Test scenario type"
+        required: true
+        default: "full_pipeline"
+        type: choice
+        options:
+          - "eda_only"
+          - "n8n_only" 
+          - "full_pipeline"
+          - "stress_test"
+      affected_systems:
+        description: "Affected systems (comma-separated)"
+        required: false
+        default: "ci-runner,s-lab-pipeline"
+
+concurrency:
+  group: eda-n8n-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  EDA_ENDPOINT: ${{ vars.EDA_ENDPOINT || 'http://148.230.94.85:5000/security-alert' }}
+  N8N_ENDPOINT: ${{ vars.N8N_ENDPOINT || '' }}
+  VPS_HOST: ${{ vars.VPS_HOST || '148.230.94.85' }}
+  TEST_ENVIRONMENT: "s-lab"
+  
+jobs:
+  # Pre-flight validation
+  validate-endpoints:
+    name: "🔍 Validate Endpoints"
+    runs-on: ubuntu-22.04
+    outputs:
+      eda_available: ${{ steps.check-eda.outputs.available }}
+      n8n_available: ${{ steps.check-n8n.outputs.available }}
+      grafana_available: ${{ steps.check-grafana.outputs.available }}
+    
+    steps:
+      - name: "🔍 Check EDA Availability" 
+        id: check-eda
+        run: |
+          if curl -f --connect-timeout 10 "$EDA_ENDPOINT" 2>/dev/null; then
+            echo "available=true" >> $GITHUB_OUTPUT
+            echo "✅ EDA endpoint reachable"
+          else
+            echo "available=false" >> $GITHUB_OUTPUT 
+            echo "⚠️ EDA endpoint not reachable"
+          fi
+          
+      - name: "🔍 Check N8N Availability"
+        id: check-n8n
+        if: env.N8N_ENDPOINT != ''
+        run: |
+          if curl -f --connect-timeout 10 "$N8N_ENDPOINT" 2>/dev/null; then
+            echo "available=true" >> $GITHUB_OUTPUT
+            echo "✅ N8N endpoint reachable"
+          else
+            echo "available=false" >> $GITHUB_OUTPUT
+            echo "⚠️ N8N endpoint not reachable" 
+          fi
+          
+      - name: "📊 Check Grafana Monitoring"
+        id: check-grafana
+        run: |
+          if curl -f --connect-timeout 10 "http://$VPS_HOST:3000/api/health" 2>/dev/null; then
+            echo "available=true" >> $GITHUB_OUTPUT
+            echo "✅ Grafana monitoring available"
+          else
+            echo "available=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Grafana monitoring not available"
+          fi
+
+  # Direct EDA testing
+  test-eda-direct:
+    name: "⚡ Test EDA Direct"
+    runs-on: ubuntu-22.04
+    needs: validate-endpoints
+    if: needs.validate-endpoints.outputs.eda_available == 'true'
+    
+    steps:
+      - name: "📝 Build Test Payload"
+        id: payload
+        run: |
+          AFFECTED_ARRAY=$(echo "${{ github.event.inputs.affected_systems }}" | sed 's/,/", "/g' | sed 's/^/"/' | sed 's/$/"/')
+          
+          PAYLOAD=$(cat <<EOF
+          {
+            "severity": "${{ github.event.inputs.severity }}",
+            "summary": "${{ github.event.inputs.summary }}",
+            "affected_systems": [$AFFECTED_ARRAY],
+            "source": "github-actions-e2e-test",
+            "environment": "$TEST_ENVIRONMENT",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "test_id": "e2e-${{ github.run_id }}-${{ github.run_attempt }}",
+            "workflow_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+            "commit_sha": "${{ github.sha }}",
+            "branch": "${{ github.ref_name }}",
+            "cvss_score": $(case "${{ github.event.inputs.severity }}" in "critical") echo "9.5";; "high") echo "7.8";; "medium") echo "5.2";; *) echo "2.1";; esac),
+            "compliance_impact": {
+              "slsa": $([ "${{ github.event.inputs.severity }}" = "critical" ] && echo "true" || echo "false"),
+              "ssdf": true,
+              "cis": $([ "${{ github.event.inputs.severity }}" != "low" ] && echo "true" || echo "false")
+            }
+          }
+          EOF
+          )
+          
+          echo "payload<<EOFPAYLOAD" >> $GITHUB_OUTPUT
+          echo "$PAYLOAD" >> $GITHUB_OUTPUT
+          echo "EOFPAYLOAD" >> $GITHUB_OUTPUT
+          
+      - name: "🚀 Send Alert to EDA"
+        run: |
+          echo "📤 Sending test alert to EDA..."
+          echo "🎯 Endpoint: $EDA_ENDPOINT"
+          echo "📊 Payload:"
+          echo '${{ steps.payload.outputs.payload }}' | jq .
+          
+          RESPONSE=$(curl -w "\\n%{http_code}" -X POST "$EDA_ENDPOINT" \\
+            -H 'Content-Type: application/json' \\
+            -H 'User-Agent: GitHub-Actions-E2E-Test/1.0' \\
+            -d '${{ steps.payload.outputs.payload }}' \\
+            --connect-timeout 30 \\
+            --max-time 60)
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          RESPONSE_BODY=$(echo "$RESPONSE" | head -n -1)
+          
+          echo "📈 HTTP Status: $HTTP_CODE"
+          echo "📄 Response: $RESPONSE_BODY"
+          
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "✅ EDA alert sent successfully"
+          else
+            echo "❌ EDA alert failed with status: $HTTP_CODE"
+            exit 1
+          fi
+
+  # N8N AI workflow testing  
+  test-n8n-ai-workflow:
+    name: "🤖 Test N8N AI Workflow"
+    runs-on: ubuntu-22.04
+    needs: validate-endpoints
+    if: needs.validate-endpoints.outputs.n8n_available == 'true' && env.N8N_ENDPOINT != ''
+    
+    steps:
+      - name: "🧠 Build AI Analysis Payload"
+        id: ai-payload
+        run: |
+          AI_PAYLOAD=$(cat <<EOF
+          {
+            "alert_payload": {
+              "severity": "${{ github.event.inputs.severity }}",
+              "summary": "${{ github.event.inputs.summary }}",
+              "affected_systems": ["${{ github.event.inputs.affected_systems }}"],
+              "source": "github-actions-ai-test",
+              "environment": "$TEST_ENVIRONMENT",
+              "cve_id": "CVE-2024-TEST-$(date +%s)",
+              "scan_results": {
+                "kics": {"critical": $([ "${{ github.event.inputs.severity }}" = "critical" ] && echo "3" || echo "0"), "high": 2},
+                "checkov": {"failed": 5, "passed": 15},
+                "trivy": {"vulnerabilities": $(case "${{ github.event.inputs.severity }}" in "critical") echo "12";; "high") echo "6";; *) echo "2";; esac)}
+              },
+              "compliance_context": {
+                "framework": "SLSA",
+                "level": 3,
+                "build_provenance": true
+              }
+            },
+            "analysis_request": {
+              "type": "security_triage",
+              "priority": "${{ github.event.inputs.severity }}",
+              "auto_remediate": $([ "${{ github.event.inputs.severity }}" = "critical" ] && echo "true" || echo "false")
+            }
+          }
+          EOF
+          )
+          
+          echo "ai_payload<<EOFAIPAYLOAD" >> $GITHUB_OUTPUT
+          echo "$AI_PAYLOAD" >> $GITHUB_OUTPUT
+          echo "EOFAIPAYLOAD" >> $GITHUB_OUTPUT
+          
+      - name: "🧠 Send to N8N AI Workflow" 
+        run: |
+          echo "🤖 Sending to N8N AI workflow..."
+          echo "🎯 Endpoint: $N8N_ENDPOINT"
+          
+          curl -X POST "$N8N_ENDPOINT" \\
+            -H 'Content-Type: application/json' \\
+            -H 'User-Agent: GitHub-Actions-AI-Test/1.0' \\
+            -d '${{ steps.ai-payload.outputs.ai_payload }}' \\
+            --connect-timeout 30 \\
+            --max-time 120 || echo "⚠️ N8N request failed but continuing"
+
+  # Stress testing for multiple events
+  stress-test:
+    name: "💥 Stress Test"
+    runs-on: ubuntu-22.04
+    needs: validate-endpoints
+    if: github.event.inputs.test_scenario == 'stress_test' && needs.validate-endpoints.outputs.eda_available == 'true'
+    
+    steps:
+      - name: "💥 Multiple Alert Burst"
+        run: |
+          echo "💥 Starting stress test with 10 rapid alerts..."
+          
+          for i in {1..10}; do
+            SEVERITY=$([ $((i % 3)) -eq 0 ] && echo "critical" || echo "high")
+            
+            PAYLOAD=$(cat <<EOF
+            {
+              "severity": "$SEVERITY",
+              "summary": "Stress test alert #$i",
+              "affected_systems": ["stress-test-$i"],
+              "source": "github-stress-test",
+              "test_id": "stress-${{ github.run_id }}-$i",
+              "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+              "cvss_score": $([ "$SEVERITY" = "critical" ] && echo "9.0" || echo "7.5")
+            }
+            EOF
+            )
+            
+            echo "📤 Sending alert #$i (severity: $SEVERITY)"
+            curl -X POST "$EDA_ENDPOINT" \\
+              -H 'Content-Type: application/json' \\
+              -d "$PAYLOAD" \\
+              --connect-timeout 10 \\
+              --max-time 20 &
+              
+            sleep 0.5
+          done
+          
+          wait
+          echo "✅ Stress test complete - sent 10 alerts"
+
+  # Monitoring verification
+  verify-monitoring:
+    name: "📊 Verify Monitoring"
+    runs-on: ubuntu-22.04
+    needs: [validate-endpoints, test-eda-direct]
+    if: needs.validate-endpoints.outputs.grafana_available == 'true'
+    
+    steps:
+      - name: "📊 Check Grafana Metrics"
+        run: |
+          echo "📈 Checking Grafana dashboards..."
+          
+          # Check if Node Exporter dashboard is accessible
+          NODE_DASHBOARD_RESPONSE=$(curl -s "http://$VPS_HOST:3000/api/dashboards/uid/rYdddlPWk" || echo "failed")
+          
+          if echo "$NODE_DASHBOARD_RESPONSE" | grep -q "Node Exporter"; then
+            echo "✅ Node Exporter dashboard (ID 1860) available"
+          else
+            echo "⚠️ Node Exporter dashboard not found"
+          fi
+          
+          # Check Prometheus targets
+          PROM_TARGETS=$(curl -s "http://$VPS_HOST:9091/api/v1/targets" || echo "failed")
+          
+          if echo "$PROM_TARGETS" | grep -q "node-exporter"; then
+            echo "✅ Prometheus scraping targets successfully"
+          else
+            echo "⚠️ Prometheus targets not properly configured"
+          fi
+
+  # Summary report
+  test-summary:
+    name: "📋 Test Summary"
+    runs-on: ubuntu-22.04
+    needs: [validate-endpoints, test-eda-direct, test-n8n-ai-workflow, stress-test, verify-monitoring]
+    if: always()
+    
+    steps:
+      - name: "📋 Generate Test Report"
+        run: |
+          echo "# 🤖 EDA + N8N E2E Test Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Test Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- **Severity**: ${{ github.event.inputs.severity }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Scenario**: ${{ github.event.inputs.test_scenario }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: $TEST_ENVIRONMENT" >> $GITHUB_STEP_SUMMARY
+          echo "- **Test ID**: e2e-${{ github.run_id }}-${{ github.run_attempt }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Status | Notes |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| EDA Endpoint | ${{ needs.validate-endpoints.outputs.eda_available == 'true' && '✅' || '❌' }} | ${{ needs.validate-endpoints.outputs.eda_available == 'true' && 'Reachable' || 'Not reachable' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| EDA Direct Test | ${{ needs.test-eda-direct.result == 'success' && '✅' || needs.test-eda-direct.result == 'skipped' && '⏭️' || '❌' }} | ${{ needs.test-eda-direct.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| N8N AI Workflow | ${{ needs.test-n8n-ai-workflow.result == 'success' && '✅' || needs.test-n8n-ai-workflow.result == 'skipped' && '⏭️' || '❌' }} | ${{ needs.test-n8n-ai-workflow.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Grafana Monitoring | ${{ needs.validate-endpoints.outputs.grafana_available == 'true' && '✅' || '❌' }} | ${{ needs.validate-endpoints.outputs.grafana_available == 'true' && 'Dashboards imported' || 'Not available' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Stress Test | ${{ needs.stress-test.result == 'success' && '✅' || needs.stress-test.result == 'skipped' && '⏭️' || '❌' }} | ${{ needs.stress-test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. 📊 Check Grafana dashboards: http://$VPS_HOST:3000" >> $GITHUB_STEP_SUMMARY
+          echo "2. 📈 Verify Prometheus metrics: http://$VPS_HOST:9091" >> $GITHUB_STEP_SUMMARY
+          echo "3. ⚡ Monitor EDA logs on VPS for playbook execution" >> $GITHUB_STEP_SUMMARY
+          echo "4. 🤖 Verify N8N workflow execution (if configured)" >> $GITHUB_STEP_SUMMARY

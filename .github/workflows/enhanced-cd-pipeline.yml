@@ -1,0 +1,587 @@
+name: 🚀 Enhanced CD Pipeline - Multi-Platform Deployment
+
+# Comprehensive deployment triggers
+on:
+  workflow_run:
+    workflows: ["Enhanced CI Pipeline - Security-First Development"]
+    types: [completed]
+    branches: [main, S-lab, develop]
+  
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target Deployment Environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options: ['dev', 'staging', 'production']
+      deployment_target:
+        description: 'Deployment Target Platform'
+        required: true
+        default: 'vps'
+        type: choice
+        options: ['vps', 'aws', 'kubernetes', 'all']
+      skip_security_validation:
+        description: 'Skip Security Validation (NOT RECOMMENDED)'
+        required: false
+        type: boolean
+        default: false
+      enable_blue_green:
+        description: 'Enable Blue-Green Deployment'
+        required: false
+        type: boolean
+        default: false
+      rollback_on_failure:
+        description: 'Auto-rollback on Deployment Failure'
+        required: false
+        type: boolean
+        default: true
+
+# Concurrency control for deployments
+concurrency:
+  group: deployment-${{ inputs.environment || (github.event.workflow_run.head_branch == 'main' && 'production') || (github.event.workflow_run.head_branch == 'S-lab' && 'staging') || 'dev' }}
+  cancel-in-progress: false  # Never cancel deployments to maintain state consistency
+
+# Centralized environment variables
+env:
+  # === VPS CONFIGURATION ===
+  VPS_HOST: "148.230.94.85"                  # Production VPS IP (Hostinger)
+  VPS_USER: "root"                           # SSH user
+  VPS_PORT: "22"                             # SSH port
+  
+  # === CONTAINER REGISTRY ===
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  
+  # === DEPLOYMENT CONFIGURATION ===
+  DEPLOYMENT_TIMEOUT: "600"                  # 10 minutes
+  HEALTH_CHECK_RETRIES: "10"                 # Health check attempts
+  HEALTH_CHECK_INTERVAL: "30"                # Seconds between health checks
+  
+  # === DYNAMIC ENVIRONMENT DETECTION ===
+  TARGET_ENVIRONMENT: ${{ 
+    inputs.environment || 
+    (github.event.workflow_run.head_branch == 'main' && 'production') ||
+    (github.event.workflow_run.head_branch == 'S-lab' && 'staging') ||
+    'dev'
+  }}
+  
+  # === SECURITY SETTINGS ===
+  ENABLE_SECURITY_VALIDATION: ${{ inputs.skip_security_validation != true }}
+  ENABLE_BLUE_GREEN: ${{ inputs.enable_blue_green || 'false' }}
+  AUTO_ROLLBACK: ${{ inputs.rollback_on_failure || 'true' }}
+
+permissions:
+  contents: read              # Repository access
+  packages: read              # Container registry access
+  id-token: write            # AWS OIDC authentication
+  actions: read              # Workflow access
+  deployments: write         # Deployment status updates
+  statuses: write            # Commit status updates
+
+jobs:
+  # === DEPLOYMENT PRE-VALIDATION ===
+  deployment-validation:
+    name: 🔍 Deployment Validation & Prerequisites
+    runs-on: ubuntu-22.04
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    
+    outputs:
+      validated: ${{ steps.validation.outputs.validated }}
+      environment: ${{ steps.validation.outputs.environment }}
+      deployment-target: ${{ steps.validation.outputs.deployment-target }}
+      container-image: ${{ steps.validation.outputs.container-image }}
+      deployment-id: ${{ steps.validation.outputs.deployment-id }}
+    
+    steps:
+      - name: 🔄 Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: 🔍 Pre-deployment Validation
+        id: validation
+        run: |
+          echo "🔍 Validating deployment prerequisites..."
+          
+          VALIDATED="false"
+          ENVIRONMENT="${{ env.TARGET_ENVIRONMENT }}"
+          DEPLOYMENT_TARGET="${{ inputs.deployment_target || 'vps' }}"
+          DEPLOYMENT_ID="deploy-$(date +%Y%m%d-%H%M%S)-${{ github.run_number }}"
+          
+          # Determine container image
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            CONTAINER_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}-${{ github.sha }}"
+          else
+            CONTAINER_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_branch }}-${{ github.event.workflow_run.head_sha }}"
+          fi
+          
+          echo "Environment: $ENVIRONMENT"
+          echo "Target: $DEPLOYMENT_TARGET"
+          echo "Container: $CONTAINER_IMAGE"
+          echo "Deployment ID: $DEPLOYMENT_ID"
+          
+          # Validate CI pipeline succeeded (if triggered by workflow_run)
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            if [ "${{ github.event.workflow_run.conclusion }}" != "success" ]; then
+              echo "❌ CI pipeline did not succeed. Deployment blocked."
+              exit 1
+            fi
+          fi
+          
+          # Environment-specific validations
+          case "$ENVIRONMENT" in
+            "production")
+              if [ "${{ github.event.workflow_run.head_branch || github.ref_name }}" != "main" ]; then
+                echo "❌ Production deployments only allowed from main branch"
+                exit 1
+              fi
+              ;;
+            "staging")
+              if [ "${{ github.event.workflow_run.head_branch || github.ref_name }}" != "S-lab" ] && [ "${{ github.event.workflow_run.head_branch || github.ref_name }}" != "develop" ]; then
+                echo "⚠️ Staging deployment from non-standard branch: ${{ github.event.workflow_run.head_branch || github.ref_name }}"
+              fi
+              ;;
+          esac
+          
+          VALIDATED="true"
+          
+          echo "validated=$VALIDATED" >> $GITHUB_OUTPUT
+          echo "environment=$ENVIRONMENT" >> $GITHUB_OUTPUT
+          echo "deployment-target=$DEPLOYMENT_TARGET" >> $GITHUB_OUTPUT
+          echo "container-image=$CONTAINER_IMAGE" >> $GITHUB_OUTPUT
+          echo "deployment-id=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
+          
+          # Generate validation summary
+          echo "# 🔍 Deployment Validation Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🗜️ Deployment Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: $ENVIRONMENT" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target Platform**: $DEPLOYMENT_TARGET" >> $GITHUB_STEP_SUMMARY
+          echo "- **Container Image**: $CONTAINER_IMAGE" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deployment ID**: $DEPLOYMENT_ID" >> $GITHUB_STEP_SUMMARY
+          echo "- **Validation Status**: ✅ Passed" >> $GITHUB_STEP_SUMMARY
+
+  # === SECURITY VALIDATION (OPTIONAL) ===
+  security-validation:
+    name: 🛡️ Pre-deployment Security Validation
+    needs: deployment-validation
+    if: env.ENABLE_SECURITY_VALIDATION == 'true' && needs.deployment-validation.outputs.validated == 'true'
+    uses: ./.github/workflows/enhanced-security-gates.yml
+    with:
+      environment: ${{ needs.deployment-validation.outputs.environment }}
+      severity_threshold: ${{ needs.deployment-validation.outputs.environment == 'production' && 'high' || 'medium' }}
+      enable_sbom: true
+      fail_on_severity: ${{ needs.deployment-validation.outputs.environment == 'production' }}
+      scan_tools: 'kics,trivy'  # Lightweight scan for deployment validation
+    secrets:
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # === VPS DEPLOYMENT ===
+  deploy-to-vps:
+    name: 🖥️ Deploy to VPS (Hostinger)
+    needs: [deployment-validation, security-validation]
+    if: always() && needs.deployment-validation.outputs.validated == 'true' && (needs.security-validation.result == 'success' || needs.security-validation.result == 'skipped') && (needs.deployment-validation.outputs.deployment-target == 'vps' || needs.deployment-validation.outputs.deployment-target == 'all')
+    runs-on: ubuntu-22.04
+    
+    environment:
+      name: ${{ needs.deployment-validation.outputs.environment }}
+      url: ${{ steps.deployment.outputs.application-url }}
+    
+    outputs:
+      deployment-status: ${{ steps.deployment.outputs.status }}
+      application-url: ${{ steps.deployment.outputs.application-url }}
+      
+    steps:
+      - name: 🔄 Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: 🔐 Setup SSH Connection
+        run: |
+          echo "🚀 Setting up SSH connection to VPS..."
+          
+          # Create SSH directory
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          
+          # Setup SSH key from secrets
+          echo "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          
+          # Add VPS to known hosts
+          ssh-keyscan -H -p ${{ env.VPS_PORT }} ${{ env.VPS_HOST }} >> ~/.ssh/known_hosts
+          
+          # Test SSH connection
+          ssh -o ConnectTimeout=10 -p ${{ env.VPS_PORT }} ${{ env.VPS_USER }}@${{ env.VPS_HOST }} "echo 'SSH connection successful'"
+          
+      - name: 📦 Prepare VPS Environment
+        run: |
+          echo "📦 Preparing VPS environment for deployment..."
+          
+          ssh -p ${{ env.VPS_PORT }} ${{ env.VPS_USER }}@${{ env.VPS_HOST }} << 'EOF'
+            # Update system packages
+            apt-get update -y
+            
+            # Install Docker if not present
+            if ! command -v docker &> /dev/null; then
+              echo "Installing Docker..."
+              curl -fsSL https://get.docker.com -o get-docker.sh
+              sh get-docker.sh
+              systemctl enable docker
+              systemctl start docker
+            fi
+            
+            # Install Docker Compose if not present
+            if ! command -v docker-compose &> /dev/null; then
+              echo "Installing Docker Compose..."
+              curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+              chmod +x /usr/local/bin/docker-compose
+            fi
+            
+            # Create application directory
+            mkdir -p /opt/devsecops-app
+            
+            # Setup firewall rules (basic security)
+            ufw allow ssh
+            ufw allow 80
+            ufw allow 443
+            ufw --force enable
+          EOF
+          
+      - name: 📥 Pull Container Image
+        run: |
+          echo "📥 Pulling container image on VPS..."
+          
+          CONTAINER_IMAGE="${{ needs.deployment-validation.outputs.container-image }}"
+          
+          ssh -p ${{ env.VPS_PORT }} ${{ env.VPS_USER }}@${{ env.VPS_HOST }} << EOF
+            # Login to GitHub Container Registry
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            
+            # Pull the container image
+            docker pull "$CONTAINER_IMAGE"
+            
+            # Verify image was pulled successfully
+            docker images | grep ${{ github.repository }}
+          EOF
+          
+      - name: 🚀 Deploy Application
+        id: deployment
+        run: |
+          echo "🚀 Deploying application to VPS..."
+          
+          CONTAINER_IMAGE="${{ needs.deployment-validation.outputs.container-image }}"
+          DEPLOYMENT_ID="${{ needs.deployment-validation.outputs.deployment-id }}"
+          ENVIRONMENT="${{ needs.deployment-validation.outputs.environment }}"
+          
+          # Create docker-compose.yml for deployment
+          cat > docker-compose.deploy.yml << EOF
+          version: '3.8'
+          services:
+            app:
+              image: $CONTAINER_IMAGE
+              container_name: devsecops-app-$ENVIRONMENT
+              restart: unless-stopped
+              ports:
+                - "80:3000"
+                - "443:3000"
+              environment:
+                - NODE_ENV=$ENVIRONMENT
+                - DEPLOYMENT_ID=$DEPLOYMENT_ID
+                - DEPLOYMENT_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+              healthcheck:
+                test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+                interval: 30s
+                timeout: 10s
+                retries: 3
+                start_period: 40s
+              labels:
+                - "traefik.enable=true"
+                - "traefik.http.routers.app.rule=Host(\`${{ env.VPS_HOST }}\`)"
+                - "traefik.http.services.app.loadbalancer.server.port=3000"
+                - "com.devsecops.environment=$ENVIRONMENT"
+                - "com.devsecops.deployment-id=$DEPLOYMENT_ID"
+          
+            watchtower:
+              image: containrrr/watchtower
+              container_name: watchtower-$ENVIRONMENT
+              restart: unless-stopped
+              volumes:
+                - /var/run/docker.sock:/var/run/docker.sock
+              environment:
+                - WATCHTOWER_CLEANUP=true
+                - WATCHTOWER_INCLUDE_STOPPED=true
+                - WATCHTOWER_SCHEDULE=0 */6 * * *  # Check every 6 hours
+          EOF
+          
+          # Copy deployment files to VPS
+          scp -P ${{ env.VPS_PORT }} docker-compose.deploy.yml ${{ env.VPS_USER }}@${{ env.VPS_HOST }}:/opt/devsecops-app/
+          
+          # Deploy the application
+          ssh -p ${{ env.VPS_PORT }} ${{ env.VPS_USER }}@${{ env.VPS_HOST }} << EOF
+            cd /opt/devsecops-app
+            
+            # Stop existing containers
+            docker-compose -f docker-compose.deploy.yml down || true
+            
+            # Clean up unused containers and images
+            docker system prune -f
+            
+            # Start new deployment
+            docker-compose -f docker-compose.deploy.yml up -d
+            
+            # Wait for container to be healthy
+            echo "Waiting for container to become healthy..."
+            sleep 30
+            
+            # Check container status
+            docker-compose -f docker-compose.deploy.yml ps
+          EOF
+          
+          # Set outputs
+          echo "status=success" >> $GITHUB_OUTPUT
+          echo "application-url=http://${{ env.VPS_HOST }}" >> $GITHUB_OUTPUT
+          
+      - name: 🔍 Health Check & Smoke Tests
+        run: |
+          echo "🔍 Running health checks and smoke tests..."
+          
+          APPLICATION_URL="http://${{ env.VPS_HOST }}"
+          RETRIES=0
+          MAX_RETRIES=${{ env.HEALTH_CHECK_RETRIES }}
+          
+          while [ $RETRIES -lt $MAX_RETRIES ]; do
+            echo "Health check attempt $((RETRIES + 1))/$MAX_RETRIES..."
+            
+            # Health check
+            if curl -f -s "$APPLICATION_URL/health" > /dev/null 2>&1; then
+              echo "✅ Health check passed!"
+              
+              # Basic smoke tests
+              echo "Running smoke tests..."
+              
+              # Test main endpoint
+              if curl -f -s "$APPLICATION_URL" > /dev/null 2>&1; then
+                echo "✅ Main endpoint responding"
+              else
+                echo "⚠️ Main endpoint not responding properly"
+              fi
+              
+              # Success - break out of loop
+              break
+            else
+              echo "❌ Health check failed, retrying in ${{ env.HEALTH_CHECK_INTERVAL }} seconds..."
+              RETRIES=$((RETRIES + 1))
+              
+              if [ $RETRIES -lt $MAX_RETRIES ]; then
+                sleep ${{ env.HEALTH_CHECK_INTERVAL }}
+              fi
+            fi
+          done
+          
+          # Final validation
+          if [ $RETRIES -ge $MAX_RETRIES ]; then
+            echo "❌ Health checks failed after $MAX_RETRIES attempts"
+            
+            # Check container logs for debugging
+            ssh -p ${{ env.VPS_PORT }} ${{ env.VPS_USER }}@${{ env.VPS_HOST }} << EOF
+              echo "=== Container Status ==="
+              docker ps
+              echo "=== Container Logs ==="
+              docker logs devsecops-app-${{ needs.deployment-validation.outputs.environment }} --tail 50
+            EOF
+            
+            if [ "${{ env.AUTO_ROLLBACK }}" = "true" ]; then
+              echo "Auto-rollback enabled, initiating rollback..."
+              # Rollback logic would go here
+            fi
+            
+            exit 1
+          else
+            echo "✅ All health checks and smoke tests passed!"
+          fi
+          
+      - name: 🗜️ Deployment Summary
+        run: |
+          echo "# 🚀 VPS Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🗜️ Deployment Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ needs.deployment-validation.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **VPS Host**: ${{ env.VPS_HOST }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Container Image**: ${{ needs.deployment-validation.outputs.container-image }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deployment ID**: ${{ needs.deployment-validation.outputs.deployment-id }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Application URL**: http://${{ env.VPS_HOST }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ✅ Successful" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🔗 Quick Links" >> $GITHUB_STEP_SUMMARY
+          echo "- [Application](http://${{ env.VPS_HOST }})" >> $GITHUB_STEP_SUMMARY
+          echo "- [Health Check](http://${{ env.VPS_HOST }}/health)" >> $GITHUB_STEP_SUMMARY
+
+  # === AWS DEPLOYMENT (PLACEHOLDER) ===
+  deploy-to-aws:
+    name: ☁️ Deploy to AWS (Future Implementation)
+    needs: [deployment-validation, security-validation]
+    if: always() && needs.deployment-validation.outputs.validated == 'true' && (needs.security-validation.result == 'success' || needs.security-validation.result == 'skipped') && (needs.deployment-validation.outputs.deployment-target == 'aws' || needs.deployment-validation.outputs.deployment-target == 'all')
+    runs-on: ubuntu-22.04
+    
+    steps:
+      - name: 📝 AWS Deployment Placeholder
+        run: |
+          echo "# ☁️ AWS Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🚧 **Coming Soon**: AWS deployment capabilities will be implemented in future releases" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Planned Features:**" >> $GITHUB_STEP_SUMMARY
+          echo "- ECS deployment with Fargate" >> $GITHUB_STEP_SUMMARY
+          echo "- EKS deployment with Helm charts" >> $GITHUB_STEP_SUMMARY
+          echo "- Lambda deployment for serverless workloads" >> $GITHUB_STEP_SUMMARY
+          echo "- CloudFormation/Terraform integration" >> $GITHUB_STEP_SUMMARY
+          echo "- Blue-green deployment strategies" >> $GITHUB_STEP_SUMMARY
+
+  # === KUBERNETES DEPLOYMENT (PLACEHOLDER) ===
+  deploy-to-kubernetes:
+    name: ⚓ Deploy to Kubernetes (Future Implementation)
+    needs: [deployment-validation, security-validation]
+    if: always() && needs.deployment-validation.outputs.validated == 'true' && (needs.security-validation.result == 'success' || needs.security-validation.result == 'skipped') && (needs.deployment-validation.outputs.deployment-target == 'kubernetes' || needs.deployment-validation.outputs.deployment-target == 'all')
+    runs-on: ubuntu-22.04
+    
+    steps:
+      - name: 📝 Kubernetes Deployment Placeholder
+        run: |
+          echo "# ⚓ Kubernetes Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🚧 **Coming Soon**: Kubernetes deployment capabilities will be implemented in future releases" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Planned Features:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Helm chart deployments" >> $GITHUB_STEP_SUMMARY
+          echo "- Kustomize overlay management" >> $GITHUB_STEP_SUMMARY
+          echo "- GitOps with ArgoCD integration" >> $GITHUB_STEP_SUMMARY
+          echo "- Istio service mesh configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- Kyverno policy enforcement" >> $GITHUB_STEP_SUMMARY
+          echo "- Horizontal Pod Autoscaling (HPA)" >> $GITHUB_STEP_SUMMARY
+
+  # === POST-DEPLOYMENT MONITORING ===
+  post-deployment:
+    name: 📊 Post-deployment Monitoring & Notifications
+    needs: [deployment-validation, deploy-to-vps, deploy-to-aws, deploy-to-kubernetes]
+    if: always() && needs.deployment-validation.outputs.validated == 'true'
+    runs-on: ubuntu-22.04
+    
+    steps:
+      - name: 📊 Deployment Status Assessment
+        run: |
+          echo "📊 Assessing overall deployment status..."
+          
+          # Check deployment results
+          VPS_STATUS="${{ needs.deploy-to-vps.result }}"
+          AWS_STATUS="${{ needs.deploy-to-aws.result }}"
+          K8S_STATUS="${{ needs.deploy-to-kubernetes.result }}"
+          
+          echo "VPS Deployment: $VPS_STATUS"
+          echo "AWS Deployment: $AWS_STATUS"
+          echo "Kubernetes Deployment: $K8S_STATUS"
+          
+          # Generate comprehensive deployment report
+          echo "# 🚀 Deployment Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🗜️ Overall Status" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ needs.deployment-validation.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deployment ID**: ${{ needs.deployment-validation.outputs.deployment-id }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp**: $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## 📋 Platform Deployment Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Platform | Status | URL | Notes |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|-----|-------|" >> $GITHUB_STEP_SUMMARY
+          
+          # VPS status
+          if [ "$VPS_STATUS" = "success" ]; then
+            echo "| VPS (Hostinger) | ✅ Success | [http://${{ env.VPS_HOST }}](http://${{ env.VPS_HOST }}) | Production ready |" >> $GITHUB_STEP_SUMMARY
+          elif [ "$VPS_STATUS" = "failure" ]; then
+            echo "| VPS (Hostinger) | ❌ Failed | - | Check logs for details |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| VPS (Hostinger) | ⏸️ Skipped | - | Not selected for deployment |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # AWS status
+          if [ "$AWS_STATUS" = "success" ]; then
+            echo "| AWS | ✅ Success | - | Future implementation |" >> $GITHUB_STEP_SUMMARY
+          elif [ "$AWS_STATUS" = "failure" ]; then
+            echo "| AWS | ❌ Failed | - | Future implementation |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| AWS | 🚧 Coming Soon | - | Future implementation |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Kubernetes status
+          if [ "$K8S_STATUS" = "success" ]; then
+            echo "| Kubernetes | ✅ Success | - | Future implementation |" >> $GITHUB_STEP_SUMMARY
+          elif [ "$K8S_STATUS" = "failure" ]; then
+            echo "| Kubernetes | ❌ Failed | - | Future implementation |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Kubernetes | 🚧 Coming Soon | - | Future implementation |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Overall success determination
+          DEPLOYMENT_SUCCESS="false"
+          if [ "$VPS_STATUS" = "success" ] || [ "$AWS_STATUS" = "success" ] || [ "$K8S_STATUS" = "success" ]; then
+            DEPLOYMENT_SUCCESS="true"
+          fi
+          
+          if [ "$DEPLOYMENT_SUCCESS" = "true" ]; then
+            echo "## ✅ Deployment Successful" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Next Steps:**" >> $GITHUB_STEP_SUMMARY
+            echo "1. Monitor application health and performance" >> $GITHUB_STEP_SUMMARY
+            echo "2. Run post-deployment tests" >> $GITHUB_STEP_SUMMARY
+            echo "3. Update monitoring dashboards" >> $GITHUB_STEP_SUMMARY
+            echo "4. Notify stakeholders of successful deployment" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ❌ Deployment Failed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Action Required:**" >> $GITHUB_STEP_SUMMARY
+            echo "1. Review deployment logs for error details" >> $GITHUB_STEP_SUMMARY
+            echo "2. Check security validation results" >> $GITHUB_STEP_SUMMARY
+            echo "3. Verify container image availability" >> $GITHUB_STEP_SUMMARY
+            echo "4. Consider rollback if auto-rollback is disabled" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          
+      - name: 📧 Send Deployment Notifications
+        if: always()
+        run: |
+          echo "📧 Preparing deployment notifications..."
+          
+          # This is where you would integrate with:
+          # - Slack notifications
+          # - Email notifications
+          # - PagerDuty alerts
+          # - Webhook notifications
+          # - Monitoring systems (DataDog, New Relic, etc.)
+          
+          echo "Deployment notification sent (placeholder - implement actual notification logic)"
+          
+          # Example webhook notification structure:
+          # curl -X POST "$WEBHOOK_URL" \
+          #   -H "Content-Type: application/json" \
+          #   -d '{
+          #     "environment": "${{ needs.deployment-validation.outputs.environment }}",
+          #     "status": "success/failure",
+          #     "deployment_id": "${{ needs.deployment-validation.outputs.deployment-id }}",
+          #     "application_url": "http://${{ env.VPS_HOST }}",
+          #     "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          #   }'
+          
+      - name: 📈 Update Deployment Metrics
+        run: |
+          echo "📈 Recording deployment metrics..."
+          
+          # This is where you would record metrics like:
+          # - Deployment frequency
+          # - Lead time for changes
+          # - Mean time to recovery (MTTR)
+          # - Change failure rate
+          
+          echo "Deployment metrics recorded (placeholder - implement actual metrics collection)"

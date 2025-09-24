@@ -1,9 +1,11 @@
 # 🚀 Enterprise DevSecOps Master Orchestration
 
-[![Security Gates](https://github.com/username/sbom-security-pipeline/workflows/Enterprise%20Orchestrator/badge.svg)](https://github.com/username/sbom-security-pipeline/actions)
+[![🚀 Enterprise Orchestrator](https://github.com/papaert/sbom/workflows/%F0%9F%9A%80%20Enterprise%20DevSecOps%20Master%20Orchestrator/badge.svg)](https://github.com/papaert/sbom/actions)
+[![🔄 CI Pipeline](https://github.com/papaert/sbom/workflows/%F0%9F%94%84%20CI%20Pipeline%20-%20Development%20Integration/badge.svg)](https://github.com/papaert/sbom/actions)
+[![🚀 CD Pipeline](https://github.com/papaert/sbom/workflows/%F0%9F%9A%80%20CD%20Pipeline%20-%20Multi-Platform%20Deployment/badge.svg)](https://github.com/papaert/sbom/actions)
 [![SLSA 3](https://slsa.dev/images/gh-badge-level3.svg)](https://slsa.dev)
-[![Cost Optimized](https://img.shields.io/badge/Cost-Optimized-green.svg)](orchestration/cost-optimization/)
-[![Compliance](https://img.shields.io/badge/Compliance-Automated-blue.svg)](orchestration/compliance-automation/)
+[![💰 Cost Optimized](https://img.shields.io/badge/%F0%9F%92%B0%20Cost-Optimized-green.svg)](orchestration/cost-optimization/)
+[![📋 Compliance](https://img.shields.io/badge/%F0%9F%93%8B%20Compliance-Automated-blue.svg)](orchestration/compliance-automation/)
 
 ## 🎯 Overview
 

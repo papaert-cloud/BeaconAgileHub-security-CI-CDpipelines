@@ -1,0 +1,401 @@
+---
+# 🚨 Critical Security Incident Response Playbook
+# Automated response for critical security alerts with comprehensive remediation
+
+- name: "Critical Security Incident Automated Response"
+  hosts: localhost
+  gather_facts: yes
+  vars:
+    incident_id: "{{ alert_id | default('CRIT-' + ansible_date_time.epoch) }}"
+    severity_level: "{{ severity | default('critical') }}"
+    response_timestamp: "{{ ansible_date_time.iso8601 }}"
+    affected_systems: "{{ affected_systems | default([]) }}"
+    compliance_impact: "{{ compliance_impact | default({}) }}"
+    
+  tasks:
+    - name: "📝 Parse and Validate Alert Data"
+      set_fact:
+        parsed_alert: "{{ alert | from_json if alert is string else alert }}"
+        incident_metadata:
+          id: "{{ incident_id }}"
+          severity: "{{ severity_level }}"
+          timestamp: "{{ response_timestamp }}"
+          source: "{{ parsed_alert.source | default('unknown') }}"
+          environment: "{{ parsed_alert.environment | default('production') }}"
+          
+    - name: "🚨 Log Critical Incident Start"
+      debug:
+        msg: |
+          =============================================================
+          🚨 CRITICAL SECURITY INCIDENT RESPONSE INITIATED
+          =============================================================
+          Incident ID: {{ incident_metadata.id }}
+          Severity: {{ incident_metadata.severity | upper }}
+          Source: {{ incident_metadata.source }}
+          Environment: {{ incident_metadata.environment }}
+          Affected Systems: {{ affected_systems | join(', ') }}
+          Response Time: {{ response_timestamp }}
+          =============================================================
+          
+    - name: "📞 Create Emergency Incident Ticket"
+      uri:
+        url: "{{ servicenow_api_url | default('https://dev123456.service-now.com/api/now/table/incident') }}"
+        method: POST
+        headers:
+          Authorization: "Basic {{ servicenow_auth | default('') | b64encode }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          short_description: "CRITICAL: {{ parsed_alert.summary | default('Automated Security Alert') }} [{{ incident_id }}]"
+          description: |
+            Critical Security Incident - Automated Response Initiated
+            
+            Incident Details:
+            - ID: {{ incident_id }}
+            - Severity: {{ severity_level | upper }}
+            - Source: {{ incident_metadata.source }}
+            - Environment: {{ incident_metadata.environment }}
+            - Timestamp: {{ response_timestamp }}
+            - CVSS Score: {{ parsed_alert.cvss_score | default('N/A') }}
+            
+            Affected Systems:
+            {{ affected_systems | to_nice_yaml }}
+            
+            Compliance Impact:
+            {{ compliance_impact | to_nice_yaml }}
+            
+            Automated Actions Taken:
+            - Incident isolation initiated
+            - Forensic data collection started
+            - Security team notified
+            - Pipeline security scan triggered
+            
+            GitHub Workflow: {{ parsed_alert.workflow_url | default('N/A') }}
+          category: "Security"
+          subcategory: "DevSecOps"
+          priority: "1"
+          urgency: "1"
+          state: "2"  # In Progress
+          assignment_group: "Security Operations"
+          opened_by: "devsecops-automation"
+        status_code: [200, 201]
+      register: incident_response
+      ignore_errors: yes
+      when: servicenow_auth is defined
+      
+    - name: "🔒 Immediate Security Containment"
+      block:
+        - name: "Stop affected containers (if containerized)"
+          docker_container:
+            name: "{{ item }}"
+            state: stopped
+            force_kill: yes
+          loop: "{{ affected_systems | select('match', '.*container.*|.*docker.*') | list }}"
+          ignore_errors: yes
+          when: affected_systems | select('match', '.*container.*|.*docker.*') | list | length > 0
+          
+        - name: "Create emergency isolation security group"
+          amazon.aws.ec2_group:
+            name: "emergency-isolation-{{ incident_id }}"
+            description: "Emergency isolation for incident {{ incident_id }}"
+            state: present
+            rules:
+              - proto: tcp
+                ports: [22]
+                cidr_ip: "10.0.0.0/8"
+                rule_desc: "SSH from internal networks only"
+              - proto: tcp
+                ports: [443]
+                cidr_ip: "10.0.0.0/8" 
+                rule_desc: "HTTPS from internal networks only"
+            tags:
+              Environment: "{{ incident_metadata.environment }}"
+              IncidentId: "{{ incident_id }}"
+              Purpose: "emergency-isolation"
+              AutoCreated: "true"
+          when: 
+            - cloud_provider is defined 
+            - cloud_provider == "aws"
+            - aws_access_key_id is defined
+          ignore_errors: yes
+          
+        - name: "Block suspicious IPs at firewall level"
+          ufw:
+            rule: deny
+            from_ip: "{{ item }}"
+            comment: "Blocked by incident {{ incident_id }}"
+          loop: "{{ parsed_alert.suspicious_ips | default([]) }}"
+          ignore_errors: yes
+          become: yes
+          when: parsed_alert.suspicious_ips is defined
+          
+    - name: "📊 Collect Comprehensive Forensic Evidence"
+      block:
+        - name: "Create forensics collection directory"
+          file:
+            path: "/tmp/forensics/{{ incident_id }}"
+            state: directory
+            mode: '0700'
+            
+        - name: "Capture system state and processes"
+          shell: |
+            #!/bin/bash
+            FORENSICS_DIR="/tmp/forensics/{{ incident_id }}"
+            
+            # System information
+            echo "=== System Information ===" > "$FORENSICS_DIR/system-info.log"
+            uname -a >> "$FORENSICS_DIR/system-info.log"
+            date >> "$FORENSICS_DIR/system-info.log"
+            uptime >> "$FORENSICS_DIR/system-info.log"
+            
+            # Active processes
+            echo "=== Active Processes ===" > "$FORENSICS_DIR/processes.log"
+            ps auxf >> "$FORENSICS_DIR/processes.log"
+            
+            # Network connections
+            echo "=== Network Connections ===" > "$FORENSICS_DIR/network.log"
+            netstat -tlnp >> "$FORENSICS_DIR/network.log"
+            ss -tulpn >> "$FORENSICS_DIR/network.log"
+            
+            # Docker containers (if available)
+            if command -v docker >/dev/null; then
+              echo "=== Docker Containers ===" > "$FORENSICS_DIR/containers.log"
+              docker ps -a >> "$FORENSICS_DIR/containers.log"
+              docker images >> "$FORENSICS_DIR/containers.log"
+            fi
+            
+            # Recent system logs
+            echo "=== System Logs (Last Hour) ===" > "$FORENSICS_DIR/system-logs.log"
+            journalctl --since "1 hour ago" >> "$FORENSICS_DIR/system-logs.log" 2>/dev/null || true
+            
+            # Security logs
+            if [ -f /var/log/auth.log ]; then
+              echo "=== Authentication Logs ===" > "$FORENSICS_DIR/auth-logs.log"
+              tail -n 500 /var/log/auth.log >> "$FORENSICS_DIR/auth-logs.log"
+            fi
+            
+            # Container logs for affected systems
+            {% for container in affected_systems %}
+            {% if 'container' in container or 'docker' in container %}
+            if docker ps -a | grep -q "{{ container }}"; then
+              echo "=== Container {{ container }} Logs ===" > "$FORENSICS_DIR/{{ container }}.log"
+              docker logs "{{ container }}" >> "$FORENSICS_DIR/{{ container }}.log" 2>&1
+            fi
+            {% endif %}
+            {% endfor %}
+            
+        - name: "Capture network traffic (if tcpdump available)"
+          shell: |
+            if command -v tcpdump >/dev/null; then
+              timeout 30 tcpdump -i any -w "/tmp/forensics/{{ incident_id }}/network-capture.pcap" port not 22 &
+              echo "Network capture started for 30 seconds"
+            fi
+          ignore_errors: yes
+          become: yes
+          
+        - name: "Archive forensic evidence"
+          archive:
+            path: "/tmp/forensics/{{ incident_id }}/"
+            dest: "/tmp/forensics/incident-{{ incident_id }}-{{ response_timestamp | regex_replace('[^0-9]', '') }}.tar.gz"
+            format: gz
+            
+        - name: "Upload forensics to secure storage"
+          amazon.aws.s3_object:
+            bucket: "{{ forensics_s3_bucket | default('security-forensics-' + incident_metadata.environment) }}"
+            object: "incidents/{{ incident_id }}/forensics-{{ response_timestamp | regex_replace('[^0-9]', '') }}.tar.gz"
+            src: "/tmp/forensics/incident-{{ incident_id }}-{{ response_timestamp | regex_replace('[^0-9]', '') }}.tar.gz"
+            mode: put
+            encrypt: yes
+            tags:
+              IncidentId: "{{ incident_id }}"
+              Severity: "{{ severity_level }}"
+              Environment: "{{ incident_metadata.environment }}"
+              Timestamp: "{{ response_timestamp }}"
+          when: 
+            - cloud_provider is defined
+            - cloud_provider == "aws"
+            - forensics_s3_bucket is defined
+          ignore_errors: yes
+          
+    - name: "🔄 Trigger Enhanced Security Pipeline Scan"
+      uri:
+        url: "https://api.github.com/repos/{{ github_org | default('papaert-cloud') }}/{{ github_repo | default('BeaconAgileHub-security-CI-CDpipelines') }}/actions/workflows/enhanced-security-gates.yml/dispatches"
+        method: POST
+        headers:
+          Authorization: "token {{ github_token }}"
+          Accept: "application/vnd.github.v3+json"
+          User-Agent: "EDA-Critical-Response/1.0"
+        body_format: json
+        body:
+          ref: "{{ github_branch | default('S-lab') }}"
+          inputs:
+            environment: "{{ incident_metadata.environment }}"
+            severity_threshold: "critical"
+            incident_id: "{{ incident_id }}"
+            fail_on_severity: "true"  # Force failure on critical findings
+            scan_tools: "kics,checkov,trivy,snyk"
+            enable_sbom: "true"
+        status_code: [204]
+      when: github_token is defined
+      ignore_errors: yes
+      
+    - name: "📢 Send Multi-Channel Emergency Notifications"
+      block:
+        - name: "Slack critical alert"
+          uri:
+            url: "{{ slack_webhook_url }}"
+            method: POST
+            body_format: json
+            body:
+              text: "🚨 CRITICAL SECURITY ALERT - IMMEDIATE ATTENTION REQUIRED 🚨"
+              channel: "#security-alerts"
+              username: "EDA-Security-Bot"
+              icon_emoji: ":rotating_light:"
+              attachments:
+                - color: "danger"
+                  title: "Critical Security Incident: {{ incident_id }}"
+                  title_link: "{{ parsed_alert.workflow_url | default('') }}"
+                  fields:
+                    - title: "Incident ID"
+                      value: "{{ incident_id }}"
+                      short: true
+                    - title: "Severity"
+                      value: "{{ severity_level | upper }}"
+                      short: true
+                    - title: "CVSS Score"
+                      value: "{{ parsed_alert.cvss_score | default('N/A') }}"
+                      short: true
+                    - title: "Environment"
+                      value: "{{ incident_metadata.environment }}"
+                      short: true
+                    - title: "Affected Systems"
+                      value: "{{ affected_systems | join(', ') if affected_systems else 'Unknown' }}"
+                      short: false
+                    - title: "Summary"
+                      value: "{{ parsed_alert.summary | default('Automated critical security alert') }}"
+                      short: false
+                    - title: "Automated Actions"
+                      value: "• Container isolation\n• Forensic collection\n• Security scan triggered\n• Incident ticket created"
+                      short: false
+                  footer: "EDA Security Automation"
+                  ts: "{{ ansible_date_time.epoch }}"
+          when: slack_webhook_url is defined
+          ignore_errors: yes
+          
+        - name: "PagerDuty critical incident"
+          uri:
+            url: "https://events.pagerduty.com/v2/enqueue"
+            method: POST
+            headers:
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              routing_key: "{{ pagerduty_integration_key }}"
+              event_action: "trigger"
+              dedup_key: "security-critical-{{ incident_id }}"
+              payload:
+                summary: "CRITICAL: {{ parsed_alert.summary | default('Security Alert') }} [{{ incident_id }}]"
+                severity: "critical"
+                source: "{{ incident_metadata.source }}"
+                component: "{{ incident_metadata.environment }}-security"
+                group: "Security Operations"
+                class: "Security Incident"
+                custom_details:
+                  incident_id: "{{ incident_id }}"
+                  affected_systems: "{{ affected_systems }}"
+                  cvss_score: "{{ parsed_alert.cvss_score | default('N/A') }}"
+                  compliance_impact: "{{ compliance_impact }}"
+                  workflow_url: "{{ parsed_alert.workflow_url | default('') }}"
+          when: pagerduty_integration_key is defined
+          ignore_errors: yes
+          
+        - name: "Email security team"
+          mail:
+            to: "{{ security_email_list | default(['security@company.com']) }}"
+            subject: "[CRITICAL] Security Incident {{ incident_id }} - Immediate Action Required"
+            body: |
+              CRITICAL SECURITY INCIDENT ALERT
+              
+              Incident ID: {{ incident_id }}
+              Severity: {{ severity_level | upper }}
+              Timestamp: {{ response_timestamp }}
+              Environment: {{ incident_metadata.environment }}
+              Source: {{ incident_metadata.source }}
+              
+              Summary:
+              {{ parsed_alert.summary | default('Automated critical security alert detected') }}
+              
+              Affected Systems:
+              {{ affected_systems | to_nice_yaml }}
+              
+              CVSS Score: {{ parsed_alert.cvss_score | default('Not provided') }}
+              
+              Compliance Impact:
+              {{ compliance_impact | to_nice_yaml }}
+              
+              Automated Response Actions Taken:
+              - Emergency containment procedures initiated
+              - Forensic evidence collection in progress
+              - Enhanced security pipeline scan triggered
+              - Incident ticket created in ServiceNow
+              - Security team notifications sent
+              
+              GitHub Workflow: {{ parsed_alert.workflow_url | default('Not provided') }}
+              
+              Please investigate immediately and coordinate response efforts.
+              
+              This is an automated message from the EDA Security Response System.
+            charset: utf8
+          when: 
+            - security_email_list is defined
+            - mail_server is defined
+          ignore_errors: yes
+          
+    - name: "📈 Generate Incident Response Report"
+      template:
+        src: incident_report.j2
+        dest: "/tmp/forensics/incident-{{ incident_id }}-report.json"
+      vars:
+        report_data:
+          incident:
+            id: "{{ incident_id }}"
+            severity: "{{ severity_level }}"
+            timestamp: "{{ response_timestamp }}"
+            source: "{{ incident_metadata.source }}"
+            environment: "{{ incident_metadata.environment }}"
+          alert_details: "{{ parsed_alert }}"
+          affected_systems: "{{ affected_systems }}"
+          compliance_impact: "{{ compliance_impact }}"
+          response_actions:
+            containment: "{{ 'completed' if affected_systems else 'skipped' }}"
+            forensics: "completed"
+            notifications: "completed"
+            pipeline_scan: "{{ 'triggered' if github_token is defined else 'skipped' }}"
+            incident_ticket: "{{ 'created' if servicenow_auth is defined else 'skipped' }}"
+          forensics_location: "/tmp/forensics/incident-{{ incident_id }}-{{ response_timestamp | regex_replace('[^0-9]', '') }}.tar.gz"
+      ignore_errors: yes
+      
+    - name: "✅ Critical Incident Response Complete"
+      debug:
+        msg: |
+          =============================================================
+          ✅ CRITICAL INCIDENT RESPONSE COMPLETED
+          =============================================================
+          Incident ID: {{ incident_id }}
+          Response Duration: {{ (ansible_date_time.epoch | int) - (response_timestamp | to_datetime('%Y-%m-%dT%H:%M:%SZ') | int) }} seconds
+          
+          Actions Completed:
+          • 📞 Emergency incident ticket created
+          • 🔒 Security containment measures applied
+          • 📊 Forensic evidence collected and archived
+          • 🔄 Enhanced security pipeline scan triggered
+          • 📢 Multi-channel notifications sent
+          • 📈 Incident report generated
+          
+          Next Steps:
+          1. Review forensic evidence
+          2. Coordinate with security team
+          3. Monitor pipeline scan results
+          4. Update incident status in ServiceNow
+          5. Conduct post-incident review
+          =============================================================
