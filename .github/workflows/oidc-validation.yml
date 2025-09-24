@@ -1,0 +1,326 @@
+name: "🔐 OIDC → AWS Validation (No Static Keys)"
+
+# 🎯 PURPOSE: Validate GitHub OIDC integration with AWS
+# Tests keyless authentication using your AWS Role ARN
+# Confirms temporary credentials work without static keys
+
+on:
+  workflow_dispatch:
+    inputs:
+      aws_region:
+        description: "AWS region for test calls"
+        required: false
+        default: "us-east-1"
+        type: string
+      extra_read_check:
+        description: "Run extra benign AWS read (ec2:DescribeRegions)"
+        required: false
+        default: true
+        type: boolean
+      debug_mode:
+        description: "Enable debug logging"
+        required: false
+        default: false
+        type: boolean
+
+  # Auto-trigger on pushes to validate OIDC setup
+  push:
+    branches: [main]
+    paths: ['.github/workflows/oidc-validation.yml']
+
+concurrency:
+  group: oidc-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write     # REQUIRED for OIDC token generation
+  contents: read      # Required for checkout
+  actions: read       # Required for workflow metadata
+
+env:
+  # DRY Configuration with fallbacks
+  AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN || 'arn:aws:iam::005965605891:role/GitHubActionsRole' }}
+  AWS_REGION: ${{ inputs.aws_region || vars.AWS_REGION || 'us-east-1' }}
+  OIDC_EXPECTED_ISS: "https://token.actions.githubusercontent.com"
+  OIDC_EXPECTED_AUD: "sts.amazonaws.com"
+  
+  # Debug configuration
+  ACTIONS_RUNNER_DEBUG: ${{ inputs.debug_mode || 'false' }}
+  ACTIONS_STEP_DEBUG: ${{ inputs.debug_mode || 'false' }}
+
+jobs:
+  validate-oidc:
+    name: "🔐 Validate OIDC ↔ AWS STS"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    
+    steps:
+      - name: "📋 Checkout Repository"
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: "🔍 Display Run Context & Diagnostics"
+        run: |
+          echo "🎯 OIDC Validation Context"
+          echo "=========================="
+          echo "Repository: ${{ github.repository }}"
+          echo "Branch/Ref: ${{ github.ref }}"
+          echo "Actor: ${{ github.actor }}"
+          echo "SHA: ${{ github.sha }}"
+          echo "Run ID: ${{ github.run_id }}"
+          echo "Workflow: ${{ github.workflow }}"
+          echo ""
+          echo "🔧 Configuration"
+          echo "================="
+          echo "AWS Role ARN: ${AWS_ROLE_ARN:-<NOT SET>}"
+          echo "AWS Region: ${AWS_REGION}"
+          echo "Expected OIDC Issuer: ${OIDC_EXPECTED_ISS}"
+          echo "Expected OIDC Audience: ${OIDC_EXPECTED_AUD}"
+          echo ""
+          echo "🌍 Environment Variables"
+          echo "========================"
+          env | grep -E '^(GITHUB_|AWS_|ACTIONS_)' | sort || true
+
+      - name: "✅ Preflight Validation Checks"
+        run: |
+          echo "🔍 Running preflight checks..."
+          
+          # Check AWS Role ARN is configured
+          if [ -z "${AWS_ROLE_ARN:-}" ]; then
+            echo "❌ ERROR: AWS_ROLE_ARN is not configured!"
+            echo "   Please set vars.AWS_ROLE_ARN in GitHub → Settings → Secrets and variables → Actions → Variables"
+            echo "   Expected: arn:aws:iam::005965605891:role/GitHubActionsRole"
+            exit 1
+          fi
+          
+          # Validate ARN format
+          if [[ ! "$AWS_ROLE_ARN" =~ ^arn:aws:iam::[0-9]+:role/.+ ]]; then
+            echo "❌ ERROR: AWS_ROLE_ARN format appears invalid: $AWS_ROLE_ARN"
+            echo "   Expected format: arn:aws:iam::ACCOUNT:role/ROLE-NAME"
+            exit 1
+          fi
+          
+          # Check permissions
+          if [ "${{ github.token }}" = "" ]; then
+            echo "❌ ERROR: GITHUB_TOKEN not available"
+            exit 1
+          fi
+          
+          echo "✅ Preflight checks passed"
+          echo "✅ AWS Role ARN: $AWS_ROLE_ARN"
+          echo "✅ Region: $AWS_REGION"
+
+      - name: "🔐 Configure AWS Credentials via OIDC"
+        id: aws_creds
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-session-name: gha-oidc-validate-${{ github.run_id }}-${{ github.run_attempt }}
+          aws-region: ${{ env.AWS_REGION }}
+          output-credentials: true
+        
+      - name: "🆔 Verify STS Caller Identity"
+        id: caller_identity
+        run: |
+          echo "🆔 Getting AWS STS Caller Identity..."
+          
+          # Get caller identity in JSON format
+          CALLER_JSON=$(aws sts get-caller-identity --output json)
+          echo "Raw STS Response:"
+          echo "$CALLER_JSON" | jq . || echo "$CALLER_JSON"
+          
+          # Extract key values
+          CALLER_ARN=$(echo "$CALLER_JSON" | jq -r .Arn)
+          ACCOUNT_ID=$(echo "$CALLER_JSON" | jq -r .Account)
+          USER_ID=$(echo "$CALLER_JSON" | jq -r .UserId)
+          
+          echo ""
+          echo "🔍 Parsed Identity Information:"
+          echo "  Caller ARN: $CALLER_ARN"
+          echo "  Account ID: $ACCOUNT_ID"
+          echo "  User ID: $USER_ID"
+          
+          # Validate this is an assumed role (not root or IAM user)
+          if [[ "$CALLER_ARN" =~ ^arn:aws:sts::[0-9]+:assumed-role/.+ ]]; then
+            echo "✅ SUCCESS: Caller ARN shows assumed-role session as expected"
+            ROLE_NAME=$(echo "$CALLER_ARN" | cut -d'/' -f2)
+            SESSION_NAME=$(echo "$CALLER_ARN" | cut -d'/' -f3)
+            echo "  Role Name: $ROLE_NAME"
+            echo "  Session Name: $SESSION_NAME"
+          else
+            echo "❌ ERROR: Caller ARN does not match expected assumed-role pattern"
+            echo "   Got: $CALLER_ARN"
+            echo "   Expected pattern: arn:aws:sts::ACCOUNT:assumed-role/ROLE-NAME/SESSION-NAME"
+            exit 1
+          fi
+          
+          # Validate account matches expected
+          EXPECTED_ACCOUNT="005965605891"
+          if [ "$ACCOUNT_ID" = "$EXPECTED_ACCOUNT" ]; then
+            echo "✅ SUCCESS: Account ID matches expected ($EXPECTED_ACCOUNT)"
+          else
+            echo "❌ ERROR: Account ID mismatch"
+            echo "   Expected: $EXPECTED_ACCOUNT"
+            echo "   Got: $ACCOUNT_ID"
+            exit 1
+          fi
+          
+          # Set outputs for other steps
+          echo "caller_arn=$CALLER_ARN" >> "$GITHUB_OUTPUT"
+          echo "account_id=$ACCOUNT_ID" >> "$GITHUB_OUTPUT"
+          echo "user_id=$USER_ID" >> "$GITHUB_OUTPUT"
+          echo "role_name=$ROLE_NAME" >> "$GITHUB_OUTPUT"
+          echo "session_name=$SESSION_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: "🌍 Test AWS Regions Access (Optional)"
+        if: ${{ inputs.extra_read_check == true }}
+        id: regions_test
+        run: |
+          echo "🌍 Testing AWS regions access..."
+          echo "This tests that the assumed role has ec2:DescribeRegions permission"
+          
+          # Test regions access
+          REGIONS_JSON=$(aws ec2 describe-regions --all-regions --output json)
+          REGION_COUNT=$(echo "$REGIONS_JSON" | jq -r '.Regions | length')
+          
+          echo "✅ SUCCESS: Retrieved $REGION_COUNT AWS regions"
+          echo "Available regions:"
+          echo "$REGIONS_JSON" | jq -r '.Regions[].RegionName' | sort | sed 's/^/  - /'
+          
+          echo "region_count=$REGION_COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: "🔒 OIDC Token Analysis (Debug)"
+        if: ${{ inputs.debug_mode == true }}
+        run: |
+          echo "🔒 OIDC Token Analysis (Debug Mode)"
+          echo "=================================="
+          
+          # Note: We can't directly access the OIDC token from the workflow
+          # But we can show the expected token claims structure
+          
+          echo "Expected OIDC Token Claims:"
+          echo "  iss (issuer): $OIDC_EXPECTED_ISS"
+          echo "  aud (audience): $OIDC_EXPECTED_AUD"
+          echo "  sub (subject): repo:${{ github.repository }}:ref:${{ github.ref }}"
+          echo "  actor: ${{ github.actor }}"
+          echo "  repository: ${{ github.repository }}"
+          echo "  ref: ${{ github.ref }}"
+          echo "  sha: ${{ github.sha }}"
+          echo "  workflow: ${{ github.workflow }}"
+          echo "  run_id: ${{ github.run_id }}"
+          
+          echo ""
+          echo "Trust Policy Should Include:"
+          echo '  StringEquals: { "token.actions.githubusercontent.com:aud": "sts.amazonaws.com" }'
+          echo '  StringLike: { "token.actions.githubusercontent.com:sub": "repo:${{ github.repository }}:*" }'
+
+      - name: "📊 Generate Validation Summary"
+        run: |
+          echo "📊 OIDC → AWS Validation Summary"
+          echo "================================="
+          echo ""
+          echo "✅ VALIDATION SUCCESSFUL!"
+          echo ""
+          echo "🔧 Configuration:"
+          echo "  AWS Role ARN: ${{ env.AWS_ROLE_ARN }}"
+          echo "  AWS Region: ${{ env.AWS_REGION }}"
+          echo "  Repository: ${{ github.repository }}"
+          echo "  Branch: ${{ github.ref_name }}"
+          echo ""
+          echo "🆔 Identity Verification:"
+          echo "  Caller ARN: ${{ steps.caller_identity.outputs.caller_arn }}"
+          echo "  Account ID: ${{ steps.caller_identity.outputs.account_id }}"
+          echo "  Role Name: ${{ steps.caller_identity.outputs.role_name }}"
+          echo "  Session: ${{ steps.caller_identity.outputs.session_name }}"
+          echo ""
+          echo "🌍 Permissions Test:"
+          if [ "${{ inputs.extra_read_check }}" = "true" ]; then
+            echo "  EC2 Regions: ✅ Retrieved ${{ steps.regions_test.outputs.region_count }} regions"
+          else
+            echo "  EC2 Regions: ⏭️ Skipped (extra_read_check=false)"
+          fi
+          echo ""
+          echo "🎯 Key Validations Passed:"
+          echo "  ✅ OIDC token generated (id-token permission)"
+          echo "  ✅ AWS STS accepted token (trust policy correct)"
+          echo "  ✅ Temporary credentials issued (no static keys used)"
+          echo "  ✅ Assumed role ARN matches expected pattern"
+          echo "  ✅ Account ID matches expected (005965605891)"
+          echo "  ✅ Role permissions allow test actions"
+          echo ""
+          echo "🚀 Ready for production DevSecOps workflows!"
+
+      - name: "📋 Update GitHub Step Summary"
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" << 'EOF'
+          # 🔐 OIDC → AWS Validation Results
+          
+          ## ✅ Validation Status: **SUCCESS**
+          
+          Your GitHub OIDC integration with AWS is working perfectly!
+          
+          ## 🔧 Configuration Verified
+          - **AWS Role ARN**: `${{ env.AWS_ROLE_ARN }}`
+          - **AWS Region**: `${{ env.AWS_REGION }}`
+          - **Repository**: `${{ github.repository }}`
+          - **Branch**: `${{ github.ref_name }}`
+          
+          ## 🆔 Identity Verification
+          - **Caller ARN**: `${{ steps.caller_identity.outputs.caller_arn }}`
+          - **Account ID**: `${{ steps.caller_identity.outputs.account_id }}` ✅
+          - **Role Name**: `${{ steps.caller_identity.outputs.role_name }}`
+          - **Session Name**: `${{ steps.caller_identity.outputs.session_name }}`
+          
+          ## 🌍 Permissions Test
+          EOF
+          
+          if [ "${{ inputs.extra_read_check }}" = "true" ]; then
+            echo "- **EC2 Regions Access**: ✅ Retrieved ${{ steps.regions_test.outputs.region_count }} regions" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- **EC2 Regions Access**: ⏭️ Skipped" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          
+          cat >> "$GITHUB_STEP_SUMMARY" << 'EOF'
+          
+          ## 🎯 Key Validations Passed
+          - ✅ **OIDC Token Generated**: GitHub issued token successfully
+          - ✅ **Trust Policy Valid**: AWS STS accepted the token
+          - ✅ **No Static Keys**: Temporary credentials used exclusively
+          - ✅ **Role ARN Verified**: Assumed role matches expected pattern
+          - ✅ **Account Verified**: Account ID matches expected (005965605891)
+          - ✅ **Permissions Working**: Role has required permissions
+          
+          ## 🚀 Next Steps
+          Your OIDC setup is production-ready! You can now:
+          1. Run enterprise DevSecOps workflows with confidence
+          2. Deploy infrastructure using Terraform with OIDC
+          3. Access AWS services without managing static keys
+          4. Implement advanced security scanning with AWS integration
+          
+          **No action required** - your keyless AWS authentication is working perfectly! 🎉
+          EOF
+
+      - name: "🎉 Success Notification"
+        run: |
+          echo "::notice title=OIDC Validation Success::✅ GitHub OIDC → AWS integration is working perfectly! Role: ${{ steps.caller_identity.outputs.role_name }}, Account: ${{ steps.caller_identity.outputs.account_id }}"
+          
+          # Send success event to EDA if endpoint is available
+          EDA_ENDPOINT="${{ vars.EDA_ENDPOINT }}"
+          if [ -n "$EDA_ENDPOINT" ]; then
+            echo "📡 Sending success notification to EDA..."
+            curl -X POST "$EDA_ENDPOINT" \
+              -H 'Content-Type: application/json' \
+              -H 'User-Agent: GitHub-OIDC-Validator/1.0' \
+              -d '{
+                "severity": "info",
+                "summary": "OIDC validation successful",
+                "source": "github-actions-oidc-validator",
+                "environment": "production",
+                "repository": "${{ github.repository }}",
+                "validation_result": "success",
+                "aws_account": "${{ steps.caller_identity.outputs.account_id }}",
+                "aws_role": "${{ steps.caller_identity.outputs.role_name }}",
+                "workflow_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              }' || echo "EDA notification failed (non-blocking)"
+          fi
