@@ -2,7 +2,7 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "GitHubOIDCTrust",
+      "Sid": "GitHubOIDCTrustUpdated",
       "Effect": "Allow",
       "Principal": {
         "Federated": "arn:aws:iam::005965605891:oidc-provider/token.actions.githubusercontent.com"
@@ -14,7 +14,12 @@
           "token.actions.githubusercontent.com:repository": "papaert-cloud/peter-security-CI-CDpipelines"
         },
         "StringLike": {
-          "token.actions.githubusercontent.com:sub": "repo:papaert-cloud/peter-security-CI-CDpipelines:*"
+          "token.actions.githubusercontent.com:sub": [
+            "repo:papaert-cloud/peter-security-CI-CDpipelines:*"
+          ]
+        },
+        "StringEquals": {
+          "token.actions.githubusercontent.com:repository_owner": "papaert-cloud"
         }
       }
     }
