@@ -1,0 +1,57 @@
+name: OIDC Authentication Validation
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, s-lab ]
+
+permissions:
+  id-token: write   # Required for OIDC
+  contents: read
+
+jobs:
+  validate-oidc:
+    runs-on: ubuntu-latest
+    
+    env:
+      AWS_REGION: us-east-1
+      AWS_ACCOUNT_ID: "005965605891"
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsOIDCRole
+          role-session-name: oidc-validation-session
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Test AWS CLI access
+        run: |
+          echo "Testing AWS CLI access..."
+          aws sts get-caller-identity
+          
+      - name: Validate OIDC authentication
+        run: |
+          echo "✅ OIDC authentication successful!"
+          echo "Repository: ${{ github.repository }}"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Workflow: ${{ github.workflow }}"
+          echo "Run ID: ${{ github.run_id }}"
+          
+      - name: Test S3 access (optional)
+        run: |
+          echo "Testing S3 access..."
+          aws s3 ls || echo "⚠️ S3 access failed (expected if no buckets configured)"
+          
+      - name: Test ECR access (optional)
+        run: |
+          echo "Testing ECR access..."
+          aws ecr describe-repositories --region ${{ env.AWS_REGION }} || echo "⚠️ ECR access failed (expected if no repos configured)"
+
+      - name: Summary
+        run: |
+          echo "🎉 OIDC validation completed successfully!"
+          echo "The GitHub Actions OIDC configuration is working properly with this repository."
