@@ -11,15 +11,13 @@
       "Condition": {
         "StringEquals": {
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-          "token.actions.githubusercontent.com:repository": "papaert-cloud/peter-security-CI-CDpipelines"
+          "token.actions.githubusercontent.com:repository": "papaert-cloud/peter-security-CI-CDpipelines",
+          "token.actions.githubusercontent.com:repository_owner": "papaert-cloud"
         },
         "StringLike": {
           "token.actions.githubusercontent.com:sub": [
             "repo:papaert-cloud/peter-security-CI-CDpipelines:*"
           ]
-        },
-        "StringEquals": {
-          "token.actions.githubusercontent.com:repository_owner": "papaert-cloud"
         }
       }
     }
