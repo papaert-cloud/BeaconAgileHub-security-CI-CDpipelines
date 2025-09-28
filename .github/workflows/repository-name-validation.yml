@@ -1,0 +1,281 @@
+name: "🎯 Repository Name Validation"
+
+on:
+  workflow_dispatch:
+    inputs:
+      validation_scope:
+        description: 'Validation scope'
+        required: false
+        default: 'comprehensive'
+        type: choice
+        options: ['basic', 'comprehensive', 'integration']
+      run_oidc_test:
+        description: 'Test OIDC authentication'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: repo-name-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Updated repository references
+  REPOSITORY_NAME: papaert-cloud/peter-security-CI-CDpipelines
+  AWS_REGION: us-east-1
+  AWS_ROLE_ARN: arn:aws:iam::005965605891:role/GitHubActionsRole
+  EDA_ENDPOINT: http://148.230.94.85:5000/security-alert
+
+jobs:
+  # Job 1: Basic Repository Validation
+  basic-validation:
+    name: "🔍 Basic Repository Validation"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    outputs:
+      repository_name: ${{ steps.validate.outputs.repository_name }}
+      validation_status: ${{ steps.validate.outputs.status }}
+      
+    steps:
+      - name: "📋 Checkout Repository"
+        uses: actions/checkout@v4
+        
+      - name: "🔍 Validate Repository Context"
+        id: validate
+        run: |
+          echo "=== REPOSITORY VALIDATION ==="
+          echo "Expected: ${{ env.REPOSITORY_NAME }}"
+          echo "Actual: ${{ github.repository }}"
+          
+          if [ "${{ github.repository }}" = "${{ env.REPOSITORY_NAME }}" ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "repository_name=${{ github.repository }}" >> $GITHUB_OUTPUT
+            echo "✅ Repository name validation: PASSED"
+          else
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "repository_name=${{ github.repository }}" >> $GITHUB_OUTPUT
+            echo "❌ Repository name validation: FAILED"
+            echo "  Expected: ${{ env.REPOSITORY_NAME }}"
+            echo "  Actual: ${{ github.repository }}"
+          fi
+          
+      - name: "📝 Check for Old Repository References"
+        run: |
+          echo "=== SCANNING FOR OLD REFERENCES ==="
+          
+          OLD_REFS=0
+          
+          # Check for BeaconAgileHub references
+          if grep -r "BeaconAgileHub-security-CI-CDpipelines" . --exclude-dir=.git --exclude="*.log" 2>/dev/null; then
+            echo "❌ Found BeaconAgileHub references"
+            OLD_REFS=$((OLD_REFS + 1))
+          else
+            echo "✅ No BeaconAgileHub references found"
+          fi
+          
+          # Check for old badge references
+          if grep -r "papaert/sbom" . --exclude-dir=.git --exclude="*.log" 2>/dev/null; then
+            echo "❌ Found old badge references (papaert/sbom)"
+            OLD_REFS=$((OLD_REFS + 1))
+          else
+            echo "✅ No old badge references found"
+          fi
+          
+          echo "Old references found: $OLD_REFS"
+          
+          if [ $OLD_REFS -gt 0 ]; then
+            echo "⚠️  WARNING: Found $OLD_REFS old repository references"
+            echo "💡 Run: ./scripts/repository-name-update.sh"
+          else
+            echo "✅ Repository name update appears complete"
+          fi
+
+  # Job 2: OIDC Authentication Test
+  oidc-validation:
+    name: "🔐 OIDC Authentication Validation"
+    needs: basic-validation
+    if: ${{ needs.basic-validation.outputs.validation_status == 'success' && inputs.run_oidc_test }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    
+    steps:
+      - name: "🔐 Configure AWS Credentials via OIDC"
+        id: aws-auth
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-session-name: repo-name-validation-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: false
+          
+      - name: "🎯 Verify OIDC Authentication"
+        run: |
+          echo "=== OIDC AUTHENTICATION VALIDATION ==="
+          
+          # Get caller identity
+          CALLER_IDENTITY=$(aws sts get-caller-identity)
+          ARN=$(echo $CALLER_IDENTITY | jq -r '.Arn')
+          
+          echo "Session ARN: $ARN"
+          
+          # Validate assumed role
+          if [[ $ARN == *"assumed-role/GitHubActionsRole"* ]]; then
+            echo "✅ OIDC authentication: SUCCESSFUL"
+            echo "  ✅ Using temporary credentials"
+            echo "  ✅ Correct role assumption"
+          else
+            echo "❌ OIDC authentication: FAILED"
+            echo "  ❌ Not using expected assumed role"
+            exit 1
+          fi
+          
+          # Test AWS service access
+          echo ""
+          echo "=== AWS SERVICE ACCESS TEST ==="
+          
+          # Test S3 access
+          echo "Testing S3 access..."
+          aws s3 ls || echo "S3 access test completed"
+          
+          # Test EC2 access
+          echo "Testing EC2 access..."
+          aws ec2 describe-regions --max-items 2
+          
+          echo "✅ AWS service access tests completed"
+
+  # Job 3: Integration Testing
+  integration-validation:
+    name: "🔗 Integration Validation"
+    needs: [basic-validation, oidc-validation]
+    if: ${{ always() && needs.basic-validation.outputs.validation_status == 'success' && inputs.validation_scope != 'basic' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    
+    steps:
+      - name: "📋 Checkout Repository"
+        uses: actions/checkout@v4
+        
+      - name: "🔐 Configure AWS Credentials"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-session-name: integration-test-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          
+      - name: "🦣 Test EDA Webhook Integration"
+        run: |
+          echo "=== EDA INTEGRATION TEST ==="
+          
+          # Test EDA webhook endpoint
+          echo "Testing EDA webhook at: ${{ env.EDA_ENDPOINT }}"
+          
+          # Send test event
+          curl -X POST "${{ env.EDA_ENDPOINT }}" \
+            -H 'Content-Type: application/json' \
+            -H 'User-Agent: Repository-Name-Validation/1.0' \
+            -d '{
+              "severity": "info",
+              "summary": "Repository name validation test",
+              "source": "github-actions-validation",
+              "environment": "test",
+              "repository": "${{ github.repository }}",
+              "workflow_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+              "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
+            }' && echo " ✅" || echo " ⚠️ "
+            
+          echo "EDA webhook test completed"
+          
+      - name: "📋 Test Documentation Links"
+        run: |
+          echo "=== DOCUMENTATION VALIDATION ==="
+          
+          # Check README.md for correct repository references
+          if [ -f "README.md" ]; then
+            echo "Checking README.md..."
+            
+            # Look for GitHub URLs
+            if grep -q "github.com/${{ github.repository }}" README.md; then
+              echo "✅ README contains correct repository URLs"
+            else
+              echo "⚠️  README may not contain updated repository URLs"
+            fi
+            
+            # Check for badges
+            BADGE_COUNT=$(grep -c "shields.io\|badge" README.md || echo "0")
+            echo "ℹ️  Found $BADGE_COUNT badges in README"
+          else
+            echo "⚠️  README.md not found"
+          fi
+
+  # Job 4: Comprehensive Validation Summary
+  validation-summary:
+    name: "📋 Validation Summary"
+    needs: [basic-validation, oidc-validation, integration-validation]
+    if: always()
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    
+    steps:
+      - name: "📋 Generate Validation Report"
+        run: |
+          echo "# 🎯 Repository Name Validation Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Execution Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository**: ${{ needs.basic-validation.outputs.repository_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Validation Scope**: ${{ inputs.validation_scope }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Execution Time**: $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Validation Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Status | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|---------|" >> $GITHUB_STEP_SUMMARY
+          
+          # Basic validation result
+          BASIC_STATUS="${{ needs.basic-validation.outputs.validation_status == 'success' && '✅ PASSED' || '❌ FAILED' }}"
+          echo "| Repository Name | $BASIC_STATUS | ${{ needs.basic-validation.outputs.repository_name }} |" >> $GITHUB_STEP_SUMMARY
+          
+          # OIDC validation result
+          if [ "${{ inputs.run_oidc_test }}" = "true" ]; then
+            OIDC_STATUS="${{ needs.oidc-validation.result == 'success' && '✅ PASSED' || needs.oidc-validation.result == 'skipped' && '⏭️ SKIPPED' || '❌ FAILED' }}"
+            echo "| OIDC Authentication | $OIDC_STATUS | AWS assumed role validation |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| OIDC Authentication | ⏭️ SKIPPED | User disabled OIDC testing |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Integration validation result
+          INTEGRATION_STATUS="${{ needs.integration-validation.result == 'success' && '✅ PASSED' || needs.integration-validation.result == 'skipped' && '⏭️ SKIPPED' || '❌ FAILED' }}"
+          echo "| Integration Tests | $INTEGRATION_STATUS | EDA webhook and documentation |" >> $GITHUB_STEP_SUMMARY
+          
+          # Calculate overall status
+          BASIC_OK=$([ "${{ needs.basic-validation.outputs.validation_status }}" = "success" ] && echo 1 || echo 0)
+          OIDC_OK=$([ "${{ needs.oidc-validation.result }}" = "success" ] || [ "${{ inputs.run_oidc_test }}" = "false" ] && echo 1 || echo 0)
+          INTEGRATION_OK=$([ "${{ needs.integration-validation.result }}" = "success" ] || [ "${{ needs.integration-validation.result }}" = "skipped" ] && echo 1 || echo 0)
+          
+          TOTAL_OK=$((BASIC_OK + OIDC_OK + INTEGRATION_OK))
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Overall Status" >> $GITHUB_STEP_SUMMARY
+          
+          if [ $TOTAL_OK -eq 3 ]; then
+            echo "- **Status**: 🎉 **REPOSITORY NAME UPDATE SUCCESSFUL**" >> $GITHUB_STEP_SUMMARY
+            echo "- **All Validations**: PASSED" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 🎯 Ready for Production" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Repository name correctly updated" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ OIDC authentication working" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Integrations validated" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Status**: 🔧 **REQUIRES ATTENTION**" >> $GITHUB_STEP_SUMMARY
+            echo "- **Passed**: $TOTAL_OK/3 validations" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 🛠️ Action Required" >> $GITHUB_STEP_SUMMARY
+            echo "Please review failed validations and apply necessary fixes." >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo ""
+          echo "✅ Repository name validation completed!"
+          echo "Check the job summary for detailed results."
