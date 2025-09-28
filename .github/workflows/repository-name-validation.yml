@@ -1,0 +1,56 @@
+name: Repository Name Validation
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, s-lab, docs-reorg ]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  validate-repository-name:
+    runs-on: ubuntu-latest
+    
+    env:
+      AWS_REGION: us-east-1
+      AWS_ACCOUNT_ID: "005965605891"
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate repository name consistency
+        run: |
+          echo "🔍 Validating repository name consistency..."
+          echo "GitHub repository: ${{ github.repository }}"
+          echo "Expected: papaert-cloud/peter-security-CI-CDpipelines"
+          
+          if [ "${{ github.repository }}" = "papaert-cloud/peter-security-CI-CDpipelines" ]; then
+            echo "✅ Repository name matches expected value"
+          else
+            echo "❌ Repository name mismatch!"
+            exit 1
+          fi
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsRole
+          role-session-name: repo-validation-session
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Test OIDC authentication
+        run: |
+          echo "🔐 Testing OIDC authentication..."
+          aws sts get-caller-identity
+          echo "✅ OIDC authentication successful!"
+
+      - name: Validation summary
+        run: |
+          echo "🎉 Repository name validation completed!"
+          echo "Repository: ${{ github.repository }}"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "OIDC Role: GitHubActionsRole"
+          echo "✅ All validations passed"

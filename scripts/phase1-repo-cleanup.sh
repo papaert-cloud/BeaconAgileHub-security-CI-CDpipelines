@@ -19,16 +19,16 @@ else
     echo "❌ Repository path not found: $REPO1_PATH"
 fi
 
-# BeaconAgileHub-security-CI-CDpipelines repository  
-echo "2. Processing BeaconAgileHub-security-CI-CDpipelines..."
-read -p "Enter path to BeaconAgileHub-security-CI-CDpipelines repo: " REPO2_PATH
+# peter-security-CI-CDpipelines repository  
+echo "2. Processing peter-security-CI-CDpipelines..."
+read -p "Enter path to peter-security-CI-CDpipelines repo: " REPO2_PATH
 
 if [ -d "$REPO2_PATH" ]; then
     cd "$REPO2_PATH"
     git checkout S-lab
     git branch -D Fail-Tester-f6607c90-2696-4d5a-a9f0-6f5e047c94c5 2>/dev/null || echo "Branch already deleted locally"
     git push origin --delete Fail-Tester-f6607c90-2696-4d5a-a9f0-6f5e047c94c5 2>/dev/null || echo "Branch already deleted remotely"
-    echo "✅ BeaconAgileHub-security-CI-CDpipelines: Cleaned"
+    echo "✅ peter-security-CI-CDpipelines: Cleaned"
 else
     echo "❌ Repository path not found: $REPO2_PATH"
 fi
