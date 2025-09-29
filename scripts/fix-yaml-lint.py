@@ -1,8 +1,141 @@
 #!/usr/bin/env python3
 """
-Automated YAML lint fixer for GitHub Actions workflows
-Fixes common yamllint issues systematically
+Advanced YAML Lint Fixer for GitHub Actions Workflows
+Fixes common yamllint violations while preserving bash syntax and functionality
 """
+import re
+from pathlib import Path
+
+def fix_yaml_content(content):
+    """Fix various YAML lint issues while preserving functionality"""
+    lines = content.split('\n')
+    fixed_lines = []
+    
+    for i, line in enumerate(lines):
+        original_line = line
+        
+        # Add document start marker to first line if missing
+        if i == 0 and line.strip() and not line.strip().startswith('---'):
+            fixed_lines.append('---')
+            fixed_lines.append(line)
+            continue
+            
+        # Remove trailing whitespace
+        line = line.rstrip()
+        
+        # Fix truthy values - quote 'on:' values that are not proper booleans
+        if re.match(r'^(\s*)on:\s*$', line):
+            # This is a standalone 'on:' key, next lines will have the trigger values
+            fixed_lines.append(line)
+            continue
+        elif re.match(r'^(\s*)on:\s+(.+)$', line):
+            # This is an inline 'on: value' format - quote the value if needed
+            match = re.match(r'^(\s*)on:\s+(.+)$', line)
+            if match:
+                indent, value = match.groups()
+                # Only quote if it's not already quoted and not a complex structure
+                if not (value.startswith('"') or value.startswith("'") or value.startswith('[')):
+                    if value in ['push', 'pull_request', 'schedule', 'workflow_dispatch']:
+                        line = f'{indent}on: "{value}"'
+        
+        # Fix comment spacing - ensure at least 2 spaces before comments
+        if '#' in line and not line.strip().startswith('#'):
+            # Find the comment position
+            comment_pos = line.find('#')
+            before_comment = line[:comment_pos]
+            comment = line[comment_pos:]
+            
+            # Only fix if there's less than 2 spaces before #
+            if before_comment.endswith(' '):
+                spaces = 0
+                for j in range(len(before_comment) - 1, -1, -1):
+                    if before_comment[j] == ' ':
+                        spaces += 1
+                    else:
+                        break
+                        
+                if spaces == 1:
+                    line = before_comment + ' ' + comment
+        
+        # Handle line length issues - break long lines intelligently
+        if len(line) > 80 and not line.strip().startswith('#'):
+            # Skip if it contains bash expressions we shouldn't break
+            if '${{' in line and '}}' in line:
+                # GitHub Actions expressions - be very careful
+                fixed_lines.append(line)
+                continue
+                
+            if '|' in line and ('bash' in line or 'shell' in line):
+                # Shell commands - don't break
+                fixed_lines.append(line)
+                continue
+                
+            # Try to find a good breaking point for YAML key-value pairs
+            if ': ' in line and not line.lstrip().startswith('- '):
+                colon_pos = line.find(': ')
+                if colon_pos > 0 and colon_pos < 60:  # reasonable key length
+                    key = line[:colon_pos + 1]
+                    value = line[colon_pos + 2:]
+                    
+                    if len(value) > 40 and ' ' in value:  # long value worth breaking
+                        # Try to break at word boundaries
+                        words = value.split()
+                        indent = len(line) - len(line.lstrip())
+                        current_line = key + ' ' + words[0]
+                        continuation_indent = ' ' * (indent + 2)
+                        
+                        for word in words[1:]:
+                            if len(current_line + ' ' + word) <= 80:
+                                current_line += ' ' + word
+                            else:
+                                fixed_lines.append(current_line)
+                                current_line = continuation_indent + word
+                                
+                        if current_line.strip():
+                            fixed_lines.append(current_line)
+                        continue
+            
+            # For lists that are too long
+            if line.lstrip().startswith('- ') and len(line) > 80:
+                # Try to break list items
+                match = re.match(r'^(\s*- )(.+)$', line)
+                if match:
+                    list_prefix, list_content = match.groups()
+                    if ': ' in list_content:
+                        # List item with key-value, try to break after key
+                        key_val_match = re.match(r'^([^:]+: )(.+)$', list_content)
+                        if key_val_match and len(key_val_match.group(2)) > 40:
+                            key_part, val_part = key_val_match.groups()
+                            if ' ' in val_part:
+                                words = val_part.split()
+                                current_line = list_prefix + key_part + words[0]
+                                continuation_indent = ' ' * len(list_prefix) + ' '
+                                
+                                for word in words[1:]:
+                                    if len(current_line + ' ' + word) <= 80:
+                                        current_line += ' ' + word
+                                    else:
+                                        fixed_lines.append(current_line)
+                                        current_line = continuation_indent + word
+                                        
+                                if current_line.strip():
+                                    fixed_lines.append(current_line)
+                                continue
+        
+        # Fix bracket spacing in arrays
+        if '[' in line and ']' in line and not line.strip().startswith('#'):
+            line = re.sub(r'\[\s*([^]]+)\s*\]', lambda m: '[' + ', '.join(x.strip() for x in m.group(1).split(',')) + ']', line)
+        
+        fixed_lines.append(line)
+    
+    # Ensure file ends with single newline
+    result = '\n'.join(fixed_lines)
+    if not result.endswith('\n'):
+        result += '\n'
+    elif result.endswith('\n\n'):
+        result = result.rstrip('\n') + '\n'
+        
+    return result
 
 import os
 import re

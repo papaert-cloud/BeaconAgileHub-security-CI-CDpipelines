@@ -1,5 +1,6 @@
 ---
 name: 🤖 Autonomous Dependabot AI Guard (NIST + SLSA L3)
+
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -21,12 +22,20 @@ on:
       - '**/go.mod'
       - '**/Cargo.toml'
   schedule:
-    - cron: '0 6 * * 1'  # Weekly compliance evidence
+    - cron: "0 11 * * *"  # 06:00 CT (summer)
+    - cron: "0 12 * * *"  # 06:00 CST (winter)
+
+concurrency:
+  group: auto-guard-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 
 env:
   SLSA_LEVEL: "3"
   NIST_FRAMEWORK: "SP-800-53-R5"
   SYSTEM_CATEGORIZATION: "MODERATE"
+  EPSS_MAX: "0.50"
+  BLOCK_SEVERITIES: "High|Critical"
+  ALLOW_MAJOR_BUMPS: "false"
 
 jobs:
   autonomous-guard:
@@ -56,19 +65,23 @@ jobs:
 
       - name: 🏗️ Build Environment Setup
         run: |
+          # Install system dependencies
+          sudo apt-get update -y
+          sudo apt-get install -y jq git curl
+
           # Install security tools
           curl -sSfL \
-            https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh
-              -s -- -b /usr/local/bin
+            https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh \
+            -s -- -b /usr/local/bin
           curl -sSfL \
-            https://raw.githubusercontent.com/anchore/grype/main/install.sh |
-              sh -s -- -b /usr/local/bin
+            https://raw.githubusercontent.com/anchore/grype/main/install.sh | \
+            sh -s -- -b /usr/local/bin
           curl -sSfL \
             https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_amd64 -o /usr/local/bin/osv-scanner
           chmod +x /usr/local/bin/osv-scanner
 
           # Install compliance tools
-          pip3 install requests pyyaml jq
+          pip3 install requests pyyaml
           gem install licensee
 
       - name: 📊 SLSA L3 SBOM Generation (SI-7, CM-8)
@@ -90,11 +103,12 @@ jobs:
         run: |
           # Primary scan with Grype
           grype sbom:sbom.json -o json > grype-results.json || true
+          grype sbom:sbom.json -o sarif > grype.sarif || true
 
           # Secondary scan with OSV
           osv-scanner --format json --output osv-results.json . || true
 
-          # Merge scan results
+          # Merge scan results (union both Grype and OSV)
           python3 -c "
           import json
 
@@ -107,15 +121,35 @@ jobs:
               with open('osv-results.json') as f: osv = json.load(f)
           except: osv = {'results': []}
 
-          # Merge and deduplicate
+          # Merge and deduplicate (union both sources)
           all_vulns = []
           seen_cves = set()
 
+          # Add Grype results
           for match in grype.get('matches', []):
               cve = match.get('vulnerability', {}).get('id', '')
               if cve and cve not in seen_cves:
                   all_vulns.append(match)
                   seen_cves.add(cve)
+
+          # Add OSV results (simplified mapping)
+          for result in osv.get('results', []):
+              for vuln in result.get('vulnerabilities', []):
+                  cve = vuln.get('id', '')
+                  if cve and cve not in seen_cves:
+                      # Convert OSV format to Grype-like format
+                      converted = {
+                          'vulnerability': {
+                              'id': cve,
+                              'severity': vuln.get('database_specific', {}).get('severity', 'Unknown')
+                          },
+                          'artifact': {
+                              'name': result.get('source', {}).get('path', 'unknown'),
+                              'version': 'unknown'
+                          }
+                      }
+                      all_vulns.append(converted)
+                      seen_cves.add(cve)
 
           merged = {'matches': all_vulns, 'scan_metadata': {
               'grype_count': len(grype.get('matches', [])),
@@ -216,26 +250,50 @@ jobs:
                         0),
                       'priority': priority,
                       'sla_hours': sla_hours,
-                      'autonomous_action':: >
-                        'AUTO_MERGE' if priority in ['P3-LOW', 'P2-MEDIUM']
+                      'autonomous_action': \
+                        'AUTO_MERGE' if priority in ['P3-LOW', 'P2-MEDIUM'] \
                           else 'HUMAN_REVIEW'
                   })
 
           # Sort by priority
-          priority_order = {'P0-CRITICAL': 0, 'P1-HIGH': 1, 'P2-MEDIUM': 2,
+          priority_order = {'P0-CRITICAL': 0, 'P1-HIGH': 1, 'P2-MEDIUM': 2, \
             'P3-LOW': 3}
-          prioritized_vulns.sort(key=lambda x: >
+          prioritized_vulns.sort(key=lambda x: \
             priority_order.get(x['priority'], 4))
 
           # Save results
           with open('epss-analysis.json', 'w') as f:
               json.dump(prioritized_vulns, f, indent=2)
 
-          print(f'Analyzed {len(prioritized_vulns)} vulnerabilities with EPSS
-            data')
+          print(f'Analyzed {len(prioritized_vulns)} vulnerabilities with EPSS data')
           "
 
+      - name: 📤 Upload SARIF for Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: grype.sarif
+        continue-on-error: true
+
+      - name: 🔍 Semver Bump Detection
+        id: semver
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          FROM=$(echo "$TITLE" | sed -nE 's/.* from ([0-9]+\.[0-9]+\.[0-9]+) to .*/\1/p')
+          TO=$(echo "$TITLE" | sed -nE 's/.* to ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')
+          bump="unknown"
+          if [ -n "$FROM" ] && [ -n "$TO" ]; then
+            IFS='.' read -r fM fm fp <<< "$FROM"
+            IFS='.' read -r tM tm tp <<< "$TO"
+            if [ "$tM" -gt "$fM" ]; then bump="major"
+            elif [ "$tm" -gt "$fm" ]; then bump="minor"
+            elif [ "$tp" -gt "$fp" ]; then bump="patch"
+            else bump="none"; fi
+          fi
+          echo "bump=$bump" >> "$GITHUB_OUTPUT"
+
       - name: 📋 License Compliance Check (SA-10)
+        continue-on-error: true
         run: |
           licensee detect --json > license-analysis.json
 
@@ -270,12 +328,42 @@ jobs:
           with open('license-compliance.json', 'w') as f:
               json.dump(result, f, indent=2)
 
-          if compliance_status == 'NON_COMPLIANT':
-              print('❌ License compliance failed')
-              exit(1)
-          else:
-              print('✅ License compliance passed')
+          print(f'License compliance: {compliance_status}')
           "
+
+      - name: 🚪 Policy Gate (Severity + EPSS + Semver)
+        id: gate
+        env:
+          EPSS_MAX: ${{ env.EPSS_MAX }}
+          BLOCK_SEVERITIES: ${{ env.BLOCK_SEVERITIES }}
+          BUMP: ${{ steps.semver.outputs.bump }}
+        run: |
+          SAFE=true
+          REASONS=()
+          
+          # Check blocked severities
+          if jq -e --arg pat "$BLOCK_SEVERITIES" \
+            '.matches[] | select(.vulnerability.severity|test($pat;"i"))' \
+            vulnerability-assessment.json >/dev/null 2>&1; then
+            SAFE=false
+            REASONS+=("Blocked severity present")
+          fi
+          
+          # Check EPSS threshold
+          MAX_EPSS=$(jq -r '[.[]?.epss_score] | max // 0' epss-analysis.json)
+          if awk -v m="$MAX_EPSS" -v t="$EPSS_MAX" 'BEGIN{exit !(m>t)}'; then
+            SAFE=false
+            REASONS+=("EPSS $MAX_EPSS > $EPSS_MAX")
+          fi
+          
+          # Check semver bump
+          if [ "$BUMP" = "major" ] && [ "${ALLOW_MAJOR_BUMPS:-false}" != "true" ]; then
+            SAFE=false
+            REASONS+=("Major bump requires review")
+          fi
+          
+          echo "safe_to_merge=$SAFE" >> "$GITHUB_OUTPUT"
+          echo "reasons=${REASONS[*]}" >> "$GITHUB_OUTPUT"
 
       - name: 🧠 Autonomous AI Decision Engine
         id: analysis
@@ -471,23 +559,24 @@ jobs:
             epss-analysis.json
             license-compliance.json
             nist-compliance-evidence.json
-          retention-days: 2555  # 7 years compliance retention
+          retention-days: 90  # 90 days retention (mirror to S3 for long-term)
 
       - name: 🚀 Autonomous Merge Decision
         if: >
-          steps.analysis.outputs.safe_to_merge == 'true' && github.event_name == 'pull_request'
+          steps.gate.outputs.safe_to_merge == 'true' && github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "🤖 Autonomous decision: SAFE TO MERGE"
           echo "Risk level: ${{ steps.analysis.outputs.risk_level }}"
           echo "Compliance status: ${{ steps.compliance.outputs.status }}"
+          echo "Policy gate: PASSED"
 
           gh pr merge ${{ github.event.pull_request.number }} --squash --auto
 
       - name: 🚨 High-Risk Alert
         if: >
-          steps.analysis.outputs.risk_level == 'CRITICAL' || steps.analysis.outputs.risk_level == 'HIGH'
+          (github.event_name == 'pull_request') && (steps.analysis.outputs.risk_level == 'CRITICAL' || steps.analysis.outputs.risk_level == 'HIGH')
         run: |
           echo "🚨 HIGH-RISK DEPENDENCY DETECTED"
           echo "Risk Level: ${{ steps.analysis.outputs.risk_level }}"

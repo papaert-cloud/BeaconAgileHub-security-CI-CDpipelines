@@ -1,0 +1,28 @@
+# Custom yamllint configuration for GitHub Actions workflows
+# More practical rules for CI/CD pipeline files
+
+extends: default
+
+rules:
+  # Be more lenient with line length for GitHub Actions
+  line-length:
+    max: 120  # Increased from default 80 to accommodate long URLs/ARNs
+    
+  # Allow truthy values commonly used in GitHub Actions
+  truthy:
+    allowed-values: ['true', 'false', 'yes', 'no', 'on', 'off']
+    check-keys: false  # Don't check YAML keys themselves
+    
+  # More lenient comment spacing
+  comments:
+    min-spaces-from-content: 1  # Allow single space before comments
+    
+  # Allow some common indentation patterns
+  indentation:
+    spaces: 2
+    check-multi-line-strings: false
+    
+  # Don't complain about empty values
+  empty-values:
+    forbid-in-block-mappings: false
+    forbid-in-flow-mappings: false

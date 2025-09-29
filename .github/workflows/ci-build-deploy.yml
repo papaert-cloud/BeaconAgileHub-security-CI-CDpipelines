@@ -3,16 +3,20 @@ name: CI Build & Deploy
 
 on:
   push:
-    branches: ['main']
+    branches: [main]
   pull_request:
-    branches: ['main']
+    branches: [main]
+
+concurrency:
+  group: ci-build-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   AWS_REGION: us-east-1
-  AWS_ACCOUNT_ID: "005965605891"  # replace if pushing to other account
+  AWS_ACCOUNT_ID: "005965605891"
 
 permissions:
-  id-token: write  # required for OIDC
+  id-token: write
   contents: read
 
 jobs:
@@ -34,8 +38,7 @@ jobs:
       - name: Run Python tests
         run: |
           if [ -d tests ]; then
-            python -m pytest tests/ -v || echo "No Python tests found or tests
-              failed"
+            python -m pytest tests/ -v || echo "No Python tests found or tests failed"
           else
             echo "No tests directory found - skipping tests"
           fi
@@ -43,20 +46,28 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: >
-            arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsOIDCRole
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsOIDCRole
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Build and push image
         run: |
           mkdir -p artifacts
+          chmod +x ./github-actions/devops/solution-01-ci-build-deploy/scripts/build_and_push.sh
           ./github-actions/devops/solution-01-ci-build-deploy/scripts/build_and_push.sh --tag ${{ github.sha }}
 
       - name: Upload SBOM & metadata to S3 (artifact storage)
         run: |
-          # This step assumes the `build_and_push.sh` wrote artifacts/sbom.cyclonedx.json
           if [ -f artifacts/sbom.cyclonedx.json ]; then
-            aws s3 cp artifacts/sbom.cyclonedx.json s3://your-artifact-bucket/${{ github.run_id }}/sbom.cyclonedx.json
+            echo "SBOM found, would upload to S3 (configure bucket name)"
+            # aws s3 cp artifacts/sbom.cyclonedx.json s3://your-artifact-bucket/${{ github.run_id }}/sbom.cyclonedx.json
           else
             echo "No SBOM found"
           fi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts-${{ github.sha }}
+          path: artifacts/
+          retention-days: 30
+        if: always()
