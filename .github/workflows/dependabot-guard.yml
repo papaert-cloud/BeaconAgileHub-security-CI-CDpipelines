@@ -30,7 +30,8 @@ env:
 
 jobs:
   autonomous-guard:
-    if: github.actor == 'dependabot[bot]' || github.event_name == 'push' || github.event_name == 'schedule'
+    if: >
+      github.actor == 'dependabot[bot]' || github.event_name == 'push' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -57,9 +58,11 @@ jobs:
         run: |
           # Install security tools
           curl -sSfL \
-            https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+            https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh
+              -s -- -b /usr/local/bin
           curl -sSfL \
-            https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+            https://raw.githubusercontent.com/anchore/grype/main/install.sh |
+              sh -s -- -b /usr/local/bin
           curl -sSfL \
             https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_amd64 -o /usr/local/bin/osv-scanner
           chmod +x /usr/local/bin/osv-scanner
@@ -154,7 +157,8 @@ jobs:
                       print(f'EPSS API error: {e}')
                   return {}
 
-              def calculate_autonomous_priority(self, cve, cvss, severity, epss_data):
+              def calculate_autonomous_priority(self, cve, cvss, severity,
+                epss_data):
                   epss_score = epss_data.get(cve, {}).get('epss_score', 0)
 
                   # Autonomous decision matrix
@@ -194,7 +198,8 @@ jobs:
               cve_id = vuln.get('id', '')
 
               if cve_id.startswith('CVE-'):
-                  cvss_score = float(vuln.get('cvss', [{}])[0].get('metrics', {}).get('baseScore', 0))
+                  cvss_score = float(vuln.get('cvss', [{}])[0].get('metrics',
+                    {}).get('baseScore', 0))
                   severity = vuln.get('severity', 'Unknown')
 
                   priority, sla_hours = analyzer.calculate_autonomous_priority(
@@ -212,19 +217,22 @@ jobs:
                       'priority': priority,
                       'sla_hours': sla_hours,
                       'autonomous_action':: >
-                        'AUTO_MERGE' if priority in ['P3-LOW', 'P2-MEDIUM'] else 'HUMAN_REVIEW'
+                        'AUTO_MERGE' if priority in ['P3-LOW', 'P2-MEDIUM']
+                          else 'HUMAN_REVIEW'
                   })
 
           # Sort by priority
           priority_order = {'P0-CRITICAL': 0, 'P1-HIGH': 1, 'P2-MEDIUM': 2,
             'P3-LOW': 3}
-          prioritized_vulns.sort(key=lambda x: priority_order.get(x['priority'], 4))
+          prioritized_vulns.sort(key=lambda x: >
+            priority_order.get(x['priority'], 4))
 
           # Save results
           with open('epss-analysis.json', 'w') as f:
               json.dump(prioritized_vulns, f, indent=2)
 
-          print(f'Analyzed {len(prioritized_vulns)} vulnerabilities with EPSS data')
+          print(f'Analyzed {len(prioritized_vulns)} vulnerabilities with EPSS
+            data')
           "
 
       - name: 📋 License Compliance Check (SA-10)
@@ -309,7 +317,8 @@ jobs:
               sla = 'Immediate'
 
           # Generate comprehensive summary
-          package_name = os.getenv('PR_TITLE', '').split()[-1] if 'bump' in os.getenv('PR_TITLE', '').lower() else 'Multiple'
+          package_name = os.getenv('PR_TITLE', '').split()[-1] if 'bump' in
+            os.getenv('PR_TITLE', '').lower() else 'Multiple'
 
           summary = f'''## 🤖 Autonomous AI Security Analysis (NIST + SLSA L3)
 
@@ -324,7 +333,8 @@ jobs:
           - **P0-Critical**: {p0_critical} (4h SLA)
           - **P1-High**: {p1_high} (24h SLA)
           - **P2-Medium**:
-             {len([v for v in epss_data if v['priority'] == 'P2-MEDIUM'])} (72h SLA)
+             {len([v for v in epss_data if v['priority'] == 'P2-MEDIUM'])} (72h
+               SLA)
           - **P3-Low**:
              {len([v for v in epss_data if v['priority'] == 'P3-LOW'])} (7d SLA)
 
@@ -334,7 +344,8 @@ jobs:
           - **CM-8 (Component Inventory)**:
              ✅ {len(sbom_data.get('artifacts', []))} components tracked
           - **SA-10 (License Compliance)**:
-             {{'COMPLIANT': '✅', 'NON_COMPLIANT': '❌'}}[license_data['status']] {license_data['status']}
+             {{'COMPLIANT': >
+               '✅', 'NON_COMPLIANT': '❌'}}[license_data['status']] {license_data['status']}
 
           ### 🔐 SLSA Level 3 Evidence
           - **Build Provenance**: ✅ Cryptographically signed
@@ -346,12 +357,14 @@ jobs:
           {action.replace('_', ' ').title()}
 
           ---
-          *Analysis: EPSS API + Multi-scanner | Framework: NIST SP 800-53 R5 | SLSA: Level 3*
+          *Analysis: >
+            EPSS API + Multi-scanner | Framework: NIST SP 800-53 R5 | SLSA: Level 3*
           '''
 
           # Post comment if PR
           if os.getenv('PR_NUMBER'):
-              subprocess.run(['gh', 'pr', 'comment', os.getenv('PR_NUMBER'), '--body', summary])
+              subprocess.run(['gh', 'pr', 'comment', os.getenv('PR_NUMBER'),
+                '--body', summary])
 
           # Set outputs
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
@@ -461,7 +474,8 @@ jobs:
           retention-days: 2555  # 7 years compliance retention
 
       - name: 🚀 Autonomous Merge Decision
-        if: steps.analysis.outputs.safe_to_merge == 'true' && github.event_name == 'pull_request'
+        if: >
+          steps.analysis.outputs.safe_to_merge == 'true' && github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -472,7 +486,8 @@ jobs:
           gh pr merge ${{ github.event.pull_request.number }} --squash --auto
 
       - name: 🚨 High-Risk Alert
-        if: steps.analysis.outputs.risk_level == 'CRITICAL' || steps.analysis.outputs.risk_level == 'HIGH'
+        if: >
+          steps.analysis.outputs.risk_level == 'CRITICAL' || steps.analysis.outputs.risk_level == 'HIGH'
         run: |
           echo "🚨 HIGH-RISK DEPENDENCY DETECTED"
           echo "Risk Level: ${{ steps.analysis.outputs.risk_level }}"
@@ -481,7 +496,8 @@ jobs:
           # Create high-priority issue
           gh issue create \
             --title "🚨 High-Risk Dependency: ${{ github.event.pull_request.title }}" \
-            --body "Autonomous AI analysis detected high-risk dependency requiring immediate attention.
+            --body "Autonomous AI analysis detected high-risk dependency
+              requiring immediate attention.
 
           **Risk Level**: ${{ steps.analysis.outputs.risk_level }}
           **PR**:  #${{ github.event.pull_request.number }}

@@ -15,4 +15,5 @@ jobs:
           echo "Trigger canary rollout using configured tool (kubectl/argo)"
       - name: Monitor metrics
         run: >
-          echo "Monitor via CloudWatch or Prometheus; rollback if errors detected"
+          echo "Monitor via CloudWatch or Prometheus; rollback if errors
+            detected"

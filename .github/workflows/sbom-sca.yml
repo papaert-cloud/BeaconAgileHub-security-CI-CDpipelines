@@ -9,7 +9,8 @@ env:
   AWS_REGION: us-east-1
   AWS_ACCOUNT_ID: "005965605891"
   ARTIFACT_BUCKET:: >
-    ''  # set to your real S3 bucket (e.g. my-org-artifacts) or leave empty to skip S3 copy
+    ''  # set to your real S3 bucket (e.g. my-org-artifacts) or leave empty to
+      skip S3 copy
 
 permissions:
   id-token: write
@@ -35,9 +36,11 @@ jobs:
           GRYPE_VER="v0.74.0"
           set -eux
           curl -sSfL \
-            https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin ${SYFT_VER}
+            https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh
+              -s -- -b /usr/local/bin ${SYFT_VER}
           curl -sSfL \
-            https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin ${GRYPE_VER}
+            https://raw.githubusercontent.com/anchore/grype/main/install.sh |
+              sh -s -- -b /usr/local/bin ${GRYPE_VER}
           syft version || true
           grype version || true
       - name: Build image

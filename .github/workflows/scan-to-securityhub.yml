@@ -36,9 +36,10 @@ jobs:
           python3 github-actions/devsecops/solution-05-security-platform/scripts/grype_to_asff.py --input grype.json --output asff.json
 
       - name:
-         Publish findings to Security Hub (requires role with securityhub:BatchImportFindings)
+          Publish findings to Security Hub (requires role with securityhub:BatchImportFindings)
         run: |
           # Configure creds via OIDC role with Security Hub permissions
           aws sts get-caller-identity
           # aws securityhub batch-import-findings --findings file://asff.json --region ${AWS_REGION}
-          echo "To push to Security Hub, enable the above aws cli command and ensure role perms"
+          echo "To push to Security Hub, enable the above aws cli command and
+            ensure role perms"

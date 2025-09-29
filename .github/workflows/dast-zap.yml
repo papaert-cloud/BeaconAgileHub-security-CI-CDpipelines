@@ -22,7 +22,8 @@ jobs:
 
       - name: Start ZAP Docker
         run: |
-          docker run -d --name zap -p 8080:8080 owasp/zap2docker-stable:latest zap.sh -daemon -host 0.0.0.0 -port 8080
+          docker run -d --name zap -p 8080:8080 owasp/zap2docker-stable:latest
+            zap.sh -daemon -host 0.0.0.0 -port 8080
 
       - name: Wait for ZAP to be ready
         run: |

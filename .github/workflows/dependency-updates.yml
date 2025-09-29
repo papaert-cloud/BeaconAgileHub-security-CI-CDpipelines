@@ -12,7 +12,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run dependency update tools
         run: |
-          # Example: run `go get -u ./...` or `npm update` in language-specific dirs
+          # Example:: >
+            run `go get -u ./...` or `npm update` in language-specific dirs
           echo "Run your dependency update commands here or integrate Dependabot"
       - name: Create PR
         run: echo "Optionally use a bot or create a PR with updates"

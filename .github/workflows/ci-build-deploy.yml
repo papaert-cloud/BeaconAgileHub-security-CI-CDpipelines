@@ -34,7 +34,8 @@ jobs:
       - name: Run Python tests
         run: |
           if [ -d tests ]; then
-            python -m pytest tests/ -v || echo "No Python tests found or tests failed"
+            python -m pytest tests/ -v || echo "No Python tests found or tests
+              failed"
           else
             echo "No tests directory found - skipping tests"
           fi
