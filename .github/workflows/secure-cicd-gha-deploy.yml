@@ -18,7 +18,7 @@ jobs:
   build-and-upload:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -45,7 +45,7 @@ jobs:
     container:
       image: hashicorp/terraform:1.6.0
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: terraform fmt and validate
         working-directory: Infra/solutions/scenario-s003-000-secure-cicd-gha/terraform
         run: |
@@ -57,7 +57,7 @@ jobs:
     needs: [build-and-upload, tf-lint-validate]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:

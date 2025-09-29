@@ -8,7 +8,7 @@ jobs:
   rebase:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Find images using base image
         run: echo "Find images dependent on base image and rebuild with updated base"
       - name: Rebuild, scan, sign

@@ -8,7 +8,7 @@ jobs:
   sbom-nightly:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Pull latest images list
         run: echo "implement logic to enumerate latest image tags"
       - name: Run syft/grype on images
