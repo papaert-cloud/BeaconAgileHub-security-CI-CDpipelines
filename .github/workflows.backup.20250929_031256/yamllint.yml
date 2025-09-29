@@ -1,0 +1,25 @@
+name: YAML Lint
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  yamllint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+      - name: Install yamllint
+        run: |
+          python -m pip install yamllint
+      - name: Run yamllint on workflows and recap
+        run: |
+          yamllint .github/workflows
+          yamllint recap
+          yamllint solutions/demo-sbom-lab

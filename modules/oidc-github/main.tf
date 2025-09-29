@@ -8,8 +8,8 @@ data "aws_caller_identity" "current" {}
 resource "aws_iam_openid_connect_provider" "maybe_create" {
   count = var.create_oidc_provider ? 1 : 0
 
-  url = "https://token.actions.githubusercontent.com"
-  client_id_list = ["sts.amazonaws.com"]
+  url             = "https://token.actions.githubusercontent.com"
+  client_id_list  = ["sts.amazonaws.com"]
   thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
 }
 
@@ -25,6 +25,7 @@ resource "aws_iam_role" "github_actions_oidc" {
     Version = "2012-10-17",
     Statement = [
       {
+        Sid    = "GitHubOIDCTrust",
         Effect = "Allow",
         Principal = {
           Federated = data.aws_iam_openid_connect_provider.existing.arn
@@ -32,7 +33,9 @@ resource "aws_iam_role" "github_actions_oidc" {
         Action = "sts:AssumeRoleWithWebIdentity",
         Condition = {
           StringEquals = {
-            "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+            "token.actions.githubusercontent.com:aud"              = "sts.amazonaws.com",
+            "token.actions.githubusercontent.com:repository"       = var.github_repo,
+            "token.actions.githubusercontent.com:repository_owner" = split("/", var.github_repo)[0]
           },
           StringLike = {
             "token.actions.githubusercontent.com:sub" = local.github_sub
@@ -46,7 +49,7 @@ resource "aws_iam_role" "github_actions_oidc" {
 resource "aws_iam_policy" "s3_put_object" {
   count = var.attach_s3_bucket != "" ? 1 : 0
 
-  name        = "GitHubActionsS3PutObject-${replace(var.attach_s3_bucket, "-", "-") }"
+  name        = "GitHubActionsS3PutObject-${replace(var.attach_s3_bucket, "-", "-")}"
   description = "Allow GitHub Actions role to write artifacts to the given S3 bucket"
 
   policy = jsonencode({
@@ -65,8 +68,8 @@ resource "aws_iam_policy" "s3_put_object" {
 }
 
 resource "aws_iam_role_policy_attachment" "attach_s3" {
-  count = var.attach_s3_bucket != "" ? 1 : 0
-  role  = aws_iam_role.github_actions_oidc.name
+  count      = var.attach_s3_bucket != "" ? 1 : 0
+  role       = aws_iam_role.github_actions_oidc.name
   policy_arn = aws_iam_policy.s3_put_object[0].arn
 }
 
@@ -92,13 +95,13 @@ resource "aws_iam_policy" "ecr_push_pull" {
           "ecr:CompleteLayerUpload",
           "ecr:PutImage"
         ],
-        Resource = length(var.attach_ecr_repositories) > 0 ? [for repo in var.attach_ecr_repositories : 
+        Resource = length(var.attach_ecr_repositories) > 0 ? [for repo in var.attach_ecr_repositories :
           startswith(repo, "arn:") ? repo : "arn:aws:ecr:${var.aws_region}:${var.account_id}:repository/${repo}"
         ] : ["*"]
       },
       {
-        Effect = "Allow",
-        Action = ["ecr:DescribeRepositories","ecr:GetRepositoryPolicy","ecr:ListImages"],
+        Effect   = "Allow",
+        Action   = ["ecr:DescribeRepositories", "ecr:GetRepositoryPolicy", "ecr:ListImages"],
         Resource = "*"
       }
     ]
@@ -106,8 +109,8 @@ resource "aws_iam_policy" "ecr_push_pull" {
 }
 
 resource "aws_iam_role_policy_attachment" "attach_ecr" {
-  count = length(var.attach_ecr_repositories) > 0 ? 1 : 0
-  role  = aws_iam_role.github_actions_oidc.name
+  count      = length(var.attach_ecr_repositories) > 0 ? 1 : 0
+  role       = aws_iam_role.github_actions_oidc.name
   policy_arn = aws_iam_policy.ecr_push_pull[0].arn
 }
 
@@ -137,8 +140,8 @@ resource "aws_iam_policy" "kms_access" {
 }
 
 resource "aws_iam_role_policy_attachment" "attach_kms" {
-  count = length(var.attach_kms_key_arns) > 0 ? 1 : 0
-  role  = aws_iam_role.github_actions_oidc.name
+  count      = length(var.attach_kms_key_arns) > 0 ? 1 : 0
+  role       = aws_iam_role.github_actions_oidc.name
   policy_arn = aws_iam_policy.kms_access[0].arn
 }
 
@@ -168,8 +171,8 @@ resource "aws_iam_policy" "securityhub_ingest" {
 }
 
 resource "aws_iam_role_policy_attachment" "attach_securityhub" {
-  count = var.enable_securityhub ? 1 : 0
-  role  = aws_iam_role.github_actions_oidc.name
+  count      = var.enable_securityhub ? 1 : 0
+  role       = aws_iam_role.github_actions_oidc.name
   policy_arn = aws_iam_policy.securityhub_ingest[0].arn
 }
 
@@ -202,8 +205,8 @@ resource "aws_iam_policy" "terraform_state_s3" {
 }
 
 resource "aws_iam_role_policy_attachment" "attach_tfstate_s3" {
-  count = var.attach_terraform_state_bucket != "" ? 1 : 0
-  role  = aws_iam_role.github_actions_oidc.name
+  count      = var.attach_terraform_state_bucket != "" ? 1 : 0
+  role       = aws_iam_role.github_actions_oidc.name
   policy_arn = aws_iam_policy.terraform_state_s3[0].arn
 }
 
@@ -231,8 +234,8 @@ resource "aws_iam_policy" "terraform_state_dynamodb" {
 }
 
 resource "aws_iam_role_policy_attachment" "attach_tfstate_dynamodb" {
-  count = var.attach_tfstate_dynamodb_table != "" ? 1 : 0
-  role  = aws_iam_role.github_actions_oidc.name
+  count      = var.attach_tfstate_dynamodb_table != "" ? 1 : 0
+  role       = aws_iam_role.github_actions_oidc.name
   policy_arn = aws_iam_policy.terraform_state_dynamodb[0].arn
 }
 
@@ -340,8 +343,8 @@ resource "aws_iam_policy" "terraform_infrastructure" {
 }
 
 resource "aws_iam_role_policy_attachment" "attach_terraform_infrastructure" {
-  count = var.enable_terraform_infrastructure ? 1 : 0
-  role  = aws_iam_role.github_actions_oidc.name
+  count      = var.enable_terraform_infrastructure ? 1 : 0
+  role       = aws_iam_role.github_actions_oidc.name
   policy_arn = aws_iam_policy.terraform_infrastructure[0].arn
 }
 

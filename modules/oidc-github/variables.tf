@@ -50,20 +50,20 @@ variable "attach_kms_key_arns" {
 
 variable "enable_securityhub" {
   description = "Optional: if true, attach minimal Security Hub permissions needed to import findings."
-  type    = bool
-  default = false
+  type        = bool
+  default     = false
 }
 
 variable "attach_terraform_state_bucket" {
   description = "Optional: S3 bucket name used for Terraform state. When set, role will get read/write permissions needed for remote state operations."
-  type    = string
-  default = ""
+  type        = string
+  default     = ""
 }
 
 variable "attach_tfstate_dynamodb_table" {
-  description = "Optional: DynamoDB table name used for Terraform state locking. When set, role will get DynamoDB permissions for locking." 
-  type    = string
-  default = ""
+  description = "Optional: DynamoDB table name used for Terraform state locking. When set, role will get DynamoDB permissions for locking."
+  type        = string
+  default     = ""
 }
 
 variable "enable_terraform_infrastructure" {

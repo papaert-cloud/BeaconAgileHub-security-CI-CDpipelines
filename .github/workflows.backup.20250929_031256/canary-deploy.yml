@@ -1,0 +1,16 @@
+name: Canary Deployment
+
+on:
+  workflow_dispatch:
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trigger canary rollout (placeholder)
+        run: |
+          # Implement with kubectl / argo rollouts / flagger
+          echo "Trigger canary rollout using configured tool (kubectl/argo)"
+      - name: Monitor metrics
+        run: echo "Monitor via CloudWatch or Prometheus; rollback if errors detected"

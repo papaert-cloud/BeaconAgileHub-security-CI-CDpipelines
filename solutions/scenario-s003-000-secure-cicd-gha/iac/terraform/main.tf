@@ -14,8 +14,8 @@ provider "aws" {
 
 # OIDC IdP for GitHub Actions
 resource "aws_iam_openid_connect_provider" "github" {
-  url             = "https://token.actions.githubusercontent.com"
-  client_id_list  = ["sts.amazonaws.com"]
+  url            = "https://token.actions.githubusercontent.com"
+  client_id_list = ["sts.amazonaws.com"]
   # Keep the thumbprint list configurable; rotate as needed
   thumbprint_list = var.github_oidc_thumbprints
 }
@@ -23,7 +23,7 @@ resource "aws_iam_openid_connect_provider" "github" {
 # Build assume-role policy document restricted by audience and subject
 data "aws_iam_policy_document" "assume_role" {
   statement {
-    effect = "Allow"
+    effect  = "Allow"
     actions = ["sts:AssumeRoleWithWebIdentity"]
     principals {
       type        = "Federated"
@@ -49,12 +49,12 @@ data "aws_iam_policy_document" "assume_role" {
 }
 
 resource "aws_iam_role" "gha_deployer" {
-  name               = var.role_name
-  assume_role_policy = data.aws_iam_policy_document.assume_role.json
+  name                 = var.role_name
+  assume_role_policy   = data.aws_iam_policy_document.assume_role.json
   permissions_boundary = var.permissions_boundary_arn == "" ? null : var.permissions_boundary_arn
   max_session_duration = 3600
-  path = "/github-actions/"
-  tags = var.tags
+  path                 = "/github-actions/"
+  tags                 = var.tags
 }
 
 # Example minimal policy for Terraform that manages S3 state + generic infra (customize per your modules)

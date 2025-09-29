@@ -7,16 +7,16 @@ variable "artifact_bucket" {
   default     = ""
 }
 module "github_oidc" {
-  source = "./modules/oidc-github"
-  create_oidc_provider = false  # Use existing provider
-  account_id            = "005965605891"
-  aws_region            = "us-east-1"
-  github_repo           = "papaert-cloud/peter-security-CI-CDpipelines"
-  role_name             = "GitHubActionsOIDCRole"
-  github_sub_suffix     = "*"
+  source               = "./modules/oidc-github"
+  create_oidc_provider = false # Use existing provider
+  account_id           = "005965605891"
+  aws_region           = "us-east-1"
+  github_repo          = "papaert-cloud/peter-security-CI-CDpipelines"
+  role_name            = "GitHubActionsOIDCRole"
+  github_sub_suffix    = "*"
 
   # S3 permissions for artifact storage
-  attach_s3_bucket      = var.artifact_bucket
+  attach_s3_bucket = var.artifact_bucket
 
   # ECR permissions for container image push/pull
   attach_ecr_repositories = [
@@ -27,7 +27,7 @@ module "github_oidc" {
 
   # KMS permissions for image signing
   attach_kms_key_arns = [
-    "arn:aws:kms:us-east-1:005965605891:key/*"  # Replace with actual key ARNs
+    "arn:aws:kms:us-east-1:005965605891:key/*" # Replace with actual key ARNs
   ]
 
   # Security Hub permissions for findings ingestion

@@ -1,0 +1,49 @@
+name: CI Build & Deploy
+
+on:
+  push:
+    branches: [ 'main' ]
+  pull_request:
+    branches: [ 'main' ]
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: 005965605891 # replace if pushing to other account
+
+permissions:
+  id-token: write # required for OIDC
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.20'
+
+      - name: Run unit tests
+        run: go test ./... -v
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsOIDCRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Build and push image
+        run: |
+          mkdir -p artifacts
+          ./github-actions/devops/solution-01-ci-build-deploy/scripts/build_and_push.sh --tag ${{ github.sha }}
+
+      - name: Upload SBOM & metadata to S3 (artifact storage)
+        run: |
+          # This step assumes the `build_and_push.sh` wrote artifacts/sbom.cyclonedx.json
+          if [ -f artifacts/sbom.cyclonedx.json ]; then
+            aws s3 cp artifacts/sbom.cyclonedx.json s3://your-artifact-bucket/${{ github.run_id }}/sbom.cyclonedx.json
+          else
+            echo "No SBOM found"
+          fi

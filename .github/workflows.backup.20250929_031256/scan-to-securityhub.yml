@@ -1,0 +1,41 @@
+name: Scan → Security Hub (ingest)
+
+on:
+  workflow_run:
+    workflows: ["SBOM & SCA Pipeline"]
+    types: [completed]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: 005965605891
+
+jobs:
+  ingest-findings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsOIDCRole
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: sbom-and-grype
+
+      - name: Convert to ASFF and push to Security Hub
+        run: |
+          python3 github-actions/devsecops/solution-05-security-platform/scripts/grype_to_asff.py --input grype.json --output asff.json
+
+      - name: Publish findings to Security Hub (requires role with securityhub:BatchImportFindings)
+        run: |
+          # Configure creds via OIDC role with Security Hub permissions
+          aws sts get-caller-identity
+          # aws securityhub batch-import-findings --findings file://asff.json --region ${AWS_REGION}
+          echo "To push to Security Hub, enable the above aws cli command and ensure role perms"

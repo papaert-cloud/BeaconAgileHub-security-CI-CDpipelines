@@ -1,0 +1,79 @@
+name: Secure CICD GHA - build & deploy (example)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: 005965605891
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsOIDCRole
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.11
+      - name: Install deps and build lambda
+        run: |
+          cd Infra/solutions/scenario-s003-000-secure-cicd-gha
+          ./build.sh
+      - name: Upload to S3
+        env:
+          AWS_REGION: us-east-1
+        run: |
+          cd Infra/solutions/scenario-s003-000-secure-cicd-gha
+          ./upload.sh ${{ secrets.LAMBDA_DEPLOY_BUCKET }} remediate/remediate.zip
+
+  tf-lint-validate:
+    runs-on: ubuntu-latest
+    container:
+      image: hashicorp/terraform:1.6.0
+    steps:
+      - uses: actions/checkout@v4
+      - name: terraform fmt and validate
+        working-directory: Infra/solutions/scenario-s003-000-secure-cicd-gha/terraform
+        run: |
+          terraform init -input=false
+          terraform fmt -recursive
+          terraform validate || true
+
+  terragrunt-apply:
+    needs: [build-and-upload, tf-lint-validate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsOIDCRole
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Install Terraform and Terragrunt
+        run: |
+          sudo apt-get update && sudo apt-get install -y unzip
+          curl -Lo tf.zip https://releases.hashicorp.com/terraform/1.6.0/terraform_1.6.0_linux_amd64.zip
+          unzip tf.zip -d /usr/local/bin
+          curl -Lo terragrunt https://github.com/gruntwork-io/terragrunt/releases/download/v0.45.0/terragrunt_linux_amd64
+          chmod +x terragrunt && sudo mv terragrunt /usr/local/bin/
+      - name: Terragrunt apply (plan only by default)
+        env:
+          AWS_REGION: us-east-1
+        run: |
+          cd Infra/solutions/scenario-s003-000-secure-cicd-gha
+          terragrunt init
+          terragrunt plan

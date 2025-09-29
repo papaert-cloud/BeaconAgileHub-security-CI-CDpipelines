@@ -1,0 +1,27 @@
+name: Semgrep Scan
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  semgrep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install semgrep
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install semgrep
+      - name: Run semgrep
+        run: |
+          if command -v semgrep >/dev/null 2>&1; then
+            semgrep --config=p/ci -j 4
+          else
+            echo "install semgrep or add action wrapper"
+          fi
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-report
+          path: semgrep-results || true

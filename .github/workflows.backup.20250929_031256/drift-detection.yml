@@ -1,0 +1,40 @@
+name: Terraform Drift Detection
+
+on:
+  schedule:
+    - cron: '0 5 * * *' # daily
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: 005965605891
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsOIDCRole
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.7
+      - name: Terraform Plan (drift)
+        run: |
+          cd terraform
+          terraform init -input=false
+          terraform plan -out=tfdrift
+          terraform show -json tfdrift > drift.json
+      - name: Upload drift report
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-drift
+          path: terraform/drift.json

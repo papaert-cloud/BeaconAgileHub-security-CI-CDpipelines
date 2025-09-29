@@ -1,0 +1,71 @@
+name: SBOM & SCA Pipeline
+
+on:
+  pull_request:
+    branches: [ main ]
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: 005965605891
+  ARTIFACT_BUCKET: '' # set to your real S3 bucket (e.g. my-org-artifacts) or leave empty to skip S3 copy
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  sbom-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsOIDCRole
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Set ARTIFACT_BUCKET from secrets (if provided)
+        run: |
+          if [ -n "${{ secrets.ARTIFACT_BUCKET }}" ]; then
+            echo "ARTIFACT_BUCKET=${{ secrets.ARTIFACT_BUCKET }}" >> $GITHUB_ENV
+          fi
+      - name: Install syft & grype
+        run: |
+          # Pin versions to reduce surprises; change versions as needed
+          SYFT_VER="v0.92.0"
+          GRYPE_VER="v0.74.0"
+          set -eux
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin ${SYFT_VER}
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin ${GRYPE_VER}
+          syft version || true
+          grype version || true
+      - name: Build image
+        run: docker build -t app:${{ github.sha }} .
+
+      - name: Generate SBOM (syft)
+        run: |
+          mkdir -p artifacts
+          syft app:${{ github.sha }} -o cyclonedx-json=./artifacts/sbom.cyclonedx.json
+
+      - name: Run Grype on SBOM
+        run: |
+          grype sbom:./artifacts/sbom.cyclonedx.json -o json > ./artifacts/grype.json
+
+      - name: Fail on high/critical
+        run: python3 github-actions/devsecops/solution-03-sbom-sca/scripts/check_grype_severity.py ./artifacts/grype.json --threshold HIGH
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-and-grype
+          path: artifacts/
+
+      - name: Copy artifacts to S3 (secure storage)
+        run: |
+          # configure AWS creds via OIDC role that has PutObject to artifact bucket
+          if [ -n "${ARTIFACT_BUCKET:-}" ]; then
+            aws s3 cp artifacts/grype.json s3://${ARTIFACT_BUCKET}/${{ github.run_id }}/grype.json || true
+            aws s3 cp artifacts/sbom.cyclonedx.json s3://${ARTIFACT_BUCKET}/${{ github.run_id }}/sbom.cyclonedx.json || true
+          else
+            echo "ARTIFACT_BUCKET not set; skipping S3 copy"
+          fi

@@ -17,7 +17,7 @@ resource "aws_s3_bucket" "artifacts" {
   server_side_encryption_configuration {
     rule {
       apply_server_side_encryption_by_default {
-        sse_algorithm = "aws:kms"
+        sse_algorithm     = "aws:kms"
         kms_master_key_id = aws_kms_key.artifacts.arn
       }
     }
@@ -40,13 +40,13 @@ resource "aws_kms_alias" "key_alias" {
 
 # ECR repo (example)
 resource "aws_ecr_repository" "app" {
-  name = "sbom-security-pipeline"
+  name                 = "sbom-security-pipeline"
   image_tag_mutability = "MUTABLE"
 }
 
 # IAM role for GitHub Actions to push to ECR
 resource "aws_iam_role" "github_ecr_push" {
-  name = "GitHubActionsECRPush-${var.account_id}"
+  name               = "GitHubActionsECRPush-${var.account_id}"
   assume_role_policy = data.aws_iam_policy_document.oidc_assume_role_policy.json
 }
 
@@ -94,7 +94,7 @@ data "aws_iam_policy_document" "ecr_push" {
   }
 
   statement {
-    actions = ["kms:Encrypt","kms:GenerateDataKey" ]
+    actions   = ["kms:Encrypt", "kms:GenerateDataKey"]
     resources = [aws_kms_key.artifacts.arn]
   }
 }
@@ -105,10 +105,10 @@ data "aws_iam_policy_document" "kms_policy" {
   statement {
     sid = "Enable IAM User Permissions"
     principals {
-      type = "AWS"
+      type        = "AWS"
       identifiers = ["arn:aws:iam::${var.account_id}:root"]
     }
-    actions = ["kms:*"]
+    actions   = ["kms:*"]
     resources = ["*"]
   }
 }

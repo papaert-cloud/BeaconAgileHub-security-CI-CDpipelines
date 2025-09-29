@@ -61,20 +61,20 @@ resource "aws_config_configuration_aggregator" "org_aggregator" {
   name = "org-aggregator"
 
   organization_aggregation_source {
-    role_arn = var.config_aggregator_role_arn
+    role_arn    = var.config_aggregator_role_arn
     aws_regions = [var.region]
   }
 }
 
 resource "aws_config_organization_managed_rule" "s3_public_read_prohibited" {
-  name = "s3-bucket-public-read-prohibited"
-  rule_identifier = "S3_BUCKET_PUBLIC_READ_PROHIBITED"
+  name              = "s3-bucket-public-read-prohibited"
+  rule_identifier   = "S3_BUCKET_PUBLIC_READ_PROHIBITED"
   excluded_accounts = var.excluded_accounts
 }
 
 resource "aws_config_organization_managed_rule" "s3_public_write_prohibited" {
-  name = "s3-bucket-public-write-prohibited"
-  rule_identifier = "S3_BUCKET_PUBLIC_WRITE_PROHIBITED"
+  name              = "s3-bucket-public-write-prohibited"
+  rule_identifier   = "S3_BUCKET_PUBLIC_WRITE_PROHIBITED"
   excluded_accounts = var.excluded_accounts
 }
 

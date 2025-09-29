@@ -1,0 +1,26 @@
+name: SonarQube Scan (optional)
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  sonar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '11'
+      - name: Run SonarQube Scanner
+        env:
+          # set SONAR_TOKEN in repo secrets if enabling
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          if [ -n "${SONAR_TOKEN:-}" ]; then
+            # placeholder for sonar-scanner invocation
+            echo "Run sonar-scanner with project config"
+          else
+            echo "SONAR_TOKEN not set; skip sonar scan"
+          fi

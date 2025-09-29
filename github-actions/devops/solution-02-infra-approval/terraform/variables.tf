@@ -8,12 +8,12 @@ variable "account_id" {
 }
 
 variable "oidc_provider_arn" {
-  type = string
+  type        = string
   description = "ARN of the GitHub OIDC provider in this account (create via Terraform or console)"
 }
 
 variable "github_repo" {
-  type = string
+  type        = string
   description = "Full repo identifier, e.g., bamg-studio/sbom-security-pipeline"
 }
 
@@ -22,6 +22,6 @@ variable "artifact_bucket" {
 }
 
 variable "kms_key_alias" {
-  type = string
+  type    = string
   default = "alias/github-actions-cosign"
 }

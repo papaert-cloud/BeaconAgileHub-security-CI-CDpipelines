@@ -1,0 +1,22 @@
+name: Nightly SBOM Rescan
+
+on:
+  schedule:
+    - cron: '0 3 * * *' # daily
+
+jobs:
+  sbom-nightly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull latest images list
+        run: echo "implement logic to enumerate latest image tags"
+      - name: Run syft/grype on images
+        run: |
+          # example placeholder
+          echo "Run syft and grype for each image and store results to S3"
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-sboms
+          path: artifacts/

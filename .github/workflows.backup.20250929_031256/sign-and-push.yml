@@ -1,0 +1,48 @@
+name: Sign Image & Push
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: 005965605891
+
+jobs:
+  build-sign-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t myapp:${{ github.sha }} .
+
+      - name: Install cosign
+        run: |
+          # install cosign from GitHub releases (keeps workflow self-contained)
+          COSIGN_VER="v2.8.0"
+          curl -Lo cosign.tar.gz "https://github.com/sigstore/cosign/releases/download/${COSIGN_VER}/cosign-${COSIGN_VER}-linux-amd64.tar.gz"
+          tar -xzf cosign.tar.gz cosign
+          sudo mv cosign /usr/local/bin/cosign
+          cosign version || true
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsOIDCRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Sign image with cosign (KMS key)
+        env:
+          COSIGN_EXPERIMENTAL: '1'
+        run: |
+          # KMS-key ARN example: arn:aws:kms:us-east-1:005965605891:key/EXAMPLE
+          cosign sign --key kms://arn:aws:kms:${{ env.AWS_REGION }}:${{ env.AWS_ACCOUNT_ID }}:key/EXAMPLE myapp:${{ github.sha }}
+
+      - name: Push to ECR
+        run: |
+          # ensure ECR login using OIDC role above
+          echo "PUSH STEP - implement ECR login and push for your org"

@@ -1,0 +1,54 @@
+name: Terraform Apply (protected)
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to apply (e.g., staging, production)'
+        required: true
+        default: 'staging'
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  TF_WORKING_DIR: terraform
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: 005965605891
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }} # Requires environment protection/config in repo settings
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.7
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsOIDCRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        run: |
+          cd $TF_WORKING_DIR
+          terraform init -input=false
+
+      - name: Terraform Apply (manual gated)
+        run: |
+          cd $TF_WORKING_DIR
+          # Re-run plan and apply. In practice, prefer to upload an approved binary tfplan and apply that.
+          terraform plan -out=tfplan
+          terraform apply -auto-approve tfplan
+
+      - name: Upload apply log
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-apply-log
+          path: $TF_WORKING_DIR/terraform.tfstate || true

@@ -1,0 +1,37 @@
+name: Pre-commit Lint & Static Checks
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.20'
+      - name: Go fmt check
+        run: |
+          gofmt_out=$(gofmt -l . || true)
+          if [ -n "$gofmt_out" ]; then
+            echo "Files not gofmt'd:\n$gofmt_out"; exit 1
+          fi
+      - name: Run go vet
+        run: go vet ./...
+      - name: Run bandit (python)
+        run: |
+          if command -v bandit >/dev/null 2>&1; then
+            bandit -r .
+          else
+            echo "bandit not installed; skip"
+          fi
+      - name: ESLint (if js present)
+        run: |
+          if [ -f package.json ]; then
+            npm ci && npx eslint . || true
+          else
+            echo "no package.json; skip"
+          fi
