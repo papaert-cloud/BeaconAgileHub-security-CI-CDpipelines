@@ -67,7 +67,9 @@ jobs:
       - name: Run Kyverno CLI (example)
         run: |
           # If you want to run Kyverno policies in CI without cluster, use kyverno CLI
-          docker run --rm -v "${{ github.workspace }}:/workspace" ghcr.io/kyverno/kyverno:latest kyverno test /workspace/policies || true
+docker run --rm -v "${{ github.workspace }}:/workspace" \
+            ghcr.io/kyverno/kyverno:latest kyverno test /workspace/policies \
+            || true
 
   notes:
     runs-on: ubuntu-latest

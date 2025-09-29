@@ -14,6 +14,7 @@ jobs:
         run: |
           # Example:: >
             run `go get -u ./...` or `npm update` in language-specific dirs
-          echo "Run your dependency update commands here or integrate Dependabot"
+          echo "Run your dependency update commands here or \
+            integrate Dependabot"
       - name: Create PR
         run: echo "Optionally use a bot or create a PR with updates"
