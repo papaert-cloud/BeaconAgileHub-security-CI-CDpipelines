@@ -77,7 +77,8 @@ jobs:
             https://raw.githubusercontent.com/anchore/grype/main/install.sh | \
             sh -s -- -b /usr/local/bin
           curl -sSfL \
-            https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_amd64 -o /usr/local/bin/osv-scanner
+            https: >
+              //github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_amd64 -o /usr/local/bin/osv-scanner
           chmod +x /usr/local/bin/osv-scanner
 
           # Install compliance tools
@@ -340,7 +341,7 @@ jobs:
         run: |
           SAFE=true
           REASONS=()
-          
+
           # Check blocked severities
           if jq -e --arg pat "$BLOCK_SEVERITIES" \
             '.matches[] | select(.vulnerability.severity|test($pat;"i"))' \
@@ -348,20 +349,20 @@ jobs:
             SAFE=false
             REASONS+=("Blocked severity present")
           fi
-          
+
           # Check EPSS threshold
           MAX_EPSS=$(jq -r '[.[]?.epss_score] | max // 0' epss-analysis.json)
           if awk -v m="$MAX_EPSS" -v t="$EPSS_MAX" 'BEGIN{exit !(m>t)}'; then
             SAFE=false
             REASONS+=("EPSS $MAX_EPSS > $EPSS_MAX")
           fi
-          
+
           # Check semver bump
           if [ "$BUMP" = "major" ] && [ "${ALLOW_MAJOR_BUMPS:-false}" != "true" ]; then
             SAFE=false
             REASONS+=("Major bump requires review")
           fi
-          
+
           echo "safe_to_merge=$SAFE" >> "$GITHUB_OUTPUT"
           echo "reasons=${REASONS[*]}" >> "$GITHUB_OUTPUT"
 
@@ -593,9 +594,9 @@ jobs:
           **Evidence**: See compliance artifacts
 
           **Required Actions**:
-          - [ ] Security team review
-          - [ ] Risk acceptance decision
-          - [ ] Remediation plan if needed" \
+          - [] Security team review
+          - [] Risk acceptance decision
+          - [] Remediation plan if needed" \
             --label "security,high-priority,autonomous-alert"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

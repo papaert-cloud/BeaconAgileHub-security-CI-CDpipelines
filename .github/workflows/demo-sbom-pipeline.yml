@@ -33,7 +33,8 @@ jobs:
           sudo apt-get update && sudo apt-get install -y jq
           curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
             | sh -s -- -b /usr/local/bin
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+          curl -sfL https: >
+            //raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
             | sh -s -- -b /usr/local/bin
 
       - name: Generate SBOM (syft)
@@ -49,7 +50,8 @@ jobs:
       - name: Upload artifacts to S3 via OIDC
         env:
           S3_URI: >
-            s3://REPLACE-ME-demo-bucket/${{ github.repository }}/${{ github.run_id }}/
+            s3: >
+              //REPLACE-ME-demo-bucket/${{ github.repository }}/${{ github.run_id }}/
         run: |
           echo "Uploading artifacts to $S3_URI"
           mkdir -p output

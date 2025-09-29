@@ -38,7 +38,8 @@ jobs:
           # install cosign from GitHub releases (keeps workflow self-contained)
           COSIGN_VER="v2.8.0"
           curl -Lo cosign.tar.gz \
-            "https://github.com/sigstore/cosign/releases/download/${COSIGN_VER}/cosign-${COSIGN_VER}-linux-amd64.tar.gz"
+            "https: >
+              //github.com/sigstore/cosign/releases/download/${COSIGN_VER}/cosign-${COSIGN_VER}-linux-amd64.tar.gz"
           tar -xzf cosign.tar.gz cosign
           sudo mv cosign /usr/local/bin/cosign
           cosign version || true

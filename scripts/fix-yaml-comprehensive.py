@@ -41,8 +41,10 @@ def fix_yaml_file(file_path):
         line = re.sub(r'\[\s+\]', '[]', line)
         
         # Fix truthy values
-        line = re.sub(r':\s+(on|off|yes|no|On|Off|Yes|No|ON|OFF|YES|NO)\s*$', 
-                     lambda m: f': {{"on": "true", "off": "false", "yes": "true", "no": "false"}.get(m.group(1).lower(), m.group(1).lower())}', line)
+        truthy_map = {"on": "true", "off": "false", "yes": "true", "no": "false"}
+        def fix_truthy(match):
+            return f': {truthy_map.get(match.group(1).lower(), match.group(1).lower())}'
+        line = re.sub(r':\s+(on|off|yes|no|On|Off|Yes|No|ON|OFF|YES|NO)\s*$', fix_truthy, line)
         
         # Handle long lines (80+ chars) - break at logical points
         if len(line) > 80 and ':' in line and not line.strip().startswith('#'):

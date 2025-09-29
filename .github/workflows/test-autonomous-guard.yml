@@ -28,7 +28,7 @@ env:
 jobs:
   test-vulnerability-detection:
     if: >
-      github.event.inputs.test_scenario == 'all' || 
+      github.event.inputs.test_scenario == 'all' ||
       github.event.inputs.test_scenario == 'vulnerability_detection'
     runs-on: ubuntu-latest
     steps:
@@ -90,7 +90,7 @@ jobs:
 
   test-policy-gates:
     if: >
-      github.event.inputs.test_scenario == 'all' || 
+      github.event.inputs.test_scenario == 'all' ||
       github.event.inputs.test_scenario == 'policy_gates'
     runs-on: ubuntu-latest
     steps:
@@ -102,7 +102,7 @@ jobs:
           BLOCK_SEVERITIES: "High|Critical"
         run: |
           echo "=== Policy Gate Testing ==="
-          
+
           # Create mock vulnerability data
           cat > mock-vulnerabilities.json << 'EOF'
           {
@@ -122,7 +122,7 @@ jobs:
             ]
           }
           EOF
-          
+
           # Create mock EPSS data
           cat > mock-epss.json << 'EOF'
           [
@@ -133,7 +133,7 @@ jobs:
             }
           ]
           EOF
-          
+
           # Test severity blocking
           echo "Testing severity blocking..."
           SAFE=true
@@ -145,7 +145,7 @@ jobs:
           else
             echo "❌ Severity blocking failed"
           fi
-          
+
           # Test EPSS threshold
           echo "Testing EPSS threshold..."
           MAX_EPSS=$(jq -r '[.[]?.epss_score] | max // 0' mock-epss.json)
@@ -158,7 +158,7 @@ jobs:
 
   test-semver-detection:
     if: >
-      github.event.inputs.test_scenario == 'all' || 
+      github.event.inputs.test_scenario == 'all' ||
       github.event.inputs.test_scenario == 'semver_detection'
     runs-on: ubuntu-latest
     steps:
@@ -167,7 +167,7 @@ jobs:
       - name: Test semver parsing
         run: |
           echo "=== Semver Detection Testing ==="
-          
+
           # Test cases
           test_cases=(
             "Bump requests from 2.25.1 to 2.25.2:patch"
@@ -175,17 +175,17 @@ jobs:
             "Bump numpy from 1.21.0 to 2.0.0:major"
             "Update dependencies:unknown"
           )
-          
+
           for test_case in "${test_cases[@]}"; do
             TITLE="${test_case%:*}"
             EXPECTED="${test_case#*:}"
-            
+
             echo "Testing: $TITLE"
-            
+
             FROM=$(echo "$TITLE" | sed -nE 's/.* from ([0-9]+\.[0-9]+\.[0-9]+) to .*/\1/p')
             TO=$(echo "$TITLE" | sed -nE 's/.* to ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')
             bump="unknown"
-            
+
             if [ -n "$FROM" ] && [ -n "$TO" ]; then
               IFS='.' read -r fM fm fp <<< "$FROM"
               IFS='.' read -r tM tm tp <<< "$TO"
@@ -194,7 +194,7 @@ jobs:
               elif [ "$tp" -gt "$fp" ]; then bump="patch"
               else bump="none"; fi
             fi
-            
+
             if [ "$bump" = "$EXPECTED" ]; then
               echo "✅ Detected: $bump (expected: $EXPECTED)"
             else
@@ -204,7 +204,7 @@ jobs:
 
   test-compliance-evidence:
     if: >
-      github.event.inputs.test_scenario == 'all' || 
+      github.event.inputs.test_scenario == 'all' ||
       github.event.inputs.test_scenario == 'compliance_evidence'
     runs-on: ubuntu-latest
     steps:
@@ -213,11 +213,11 @@ jobs:
       - name: Generate compliance evidence
         run: |
           echo "=== Compliance Evidence Testing ==="
-          
+
           python3 -c "
           import json
           from datetime import datetime
-          
+
           # Generate test compliance evidence
           evidence = {
               'assessment_timestamp': datetime.now().isoformat(),
@@ -243,10 +243,10 @@ jobs:
               'overall_compliance_status': 'CONTINUOUS_MONITORING',
               'risk_management_strategy': 'AUTOMATED_CONTINUOUS_ASSESSMENT'
           }
-          
+
           with open('test-compliance-evidence.json', 'w') as f:
               json.dump(evidence, f, indent=2)
-          
+
           print('✅ Compliance evidence generated')
           print(f'Controls implemented: {len(evidence[\"controls_implemented\"])}')
           "
@@ -254,12 +254,12 @@ jobs:
       - name: Validate compliance structure
         run: |
           echo "=== Compliance Evidence Validation ==="
-          
+
           if [ -f test-compliance-evidence.json ]; then
             # Validate JSON structure
             jq . test-compliance-evidence.json > /dev/null
             echo "✅ Valid JSON structure"
-            
+
             # Check required fields
             REQUIRED_FIELDS=("assessment_timestamp" "nist_framework" "controls_implemented")
             for field in "${REQUIRED_FIELDS[@]}"; do
@@ -269,7 +269,7 @@ jobs:
                 echo "❌ Missing required field: $field"
               fi
             done
-            
+
             # Count implemented controls
             CONTROL_COUNT=$(jq '.controls_implemented | keys | length' test-compliance-evidence.json)
             echo "✅ Implemented controls: $CONTROL_COUNT"
@@ -280,7 +280,8 @@ jobs:
 
   test-integration:
     if: github.event.inputs.test_scenario == 'all'
-    needs: [test-vulnerability-detection, test-policy-gates, test-semver-detection, test-compliance-evidence]
+    needs: >
+      [test-vulnerability-detection, test-policy-gates, test-semver-detection, test-compliance-evidence]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -305,13 +306,13 @@ jobs:
         run: |
           cat > test-report.md << 'EOF'
           # Autonomous Guard Test Report
-          
+
           **Test Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
           **Repository:** ${{ github.repository }}
           **Commit:** ${{ github.sha }}
-          
+
           ## Test Results
-          
+
           | Component | Status | Notes |
           |-----------|--------|-------|
           | Vulnerability Detection | ✅ Pass | Multi-scanner working |
@@ -319,14 +320,14 @@ jobs:
           | Semver Detection | ✅ Pass | Major/minor/patch parsing |
           | Compliance Evidence | ✅ Pass | NIST SP 800-53 mapping |
           | SARIF Generation | ✅ Pass | Code Scanning integration |
-          
+
           ## Recommendations
-          
+
           1. Deploy to production environment
           2. Configure real S3 bucket for long-term evidence storage
           3. Set up monitoring dashboards
           4. Train security team on new workflows
-          
+
           EOF
-          
+
           echo "📊 Test report generated: test-report.md"
