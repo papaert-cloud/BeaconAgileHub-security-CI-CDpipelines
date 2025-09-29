@@ -12,7 +12,7 @@ permissions:
 
 env:
   AWS_REGION: us-east-1
-  AWS_ACCOUNT_ID: 005965605891
+  AWS_ACCOUNT_ID: "005965605891"
 
 jobs:
   build-and-upload:

@@ -8,7 +8,7 @@ on:
 
 env:
   AWS_REGION: us-east-1
-  AWS_ACCOUNT_ID: 005965605891 # replace if pushing to other account
+  AWS_ACCOUNT_ID: "005965605891" # replace if pushing to other account
 
 permissions:
   id-token: write # required for OIDC

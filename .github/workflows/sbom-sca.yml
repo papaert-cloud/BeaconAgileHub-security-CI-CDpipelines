@@ -6,7 +6,7 @@ on:
 
 env:
   AWS_REGION: us-east-1
-  AWS_ACCOUNT_ID: 005965605891
+  AWS_ACCOUNT_ID: "005965605891"
   ARTIFACT_BUCKET: '' # set to your real S3 bucket (e.g. my-org-artifacts) or leave empty to skip S3 copy
 
 permissions:

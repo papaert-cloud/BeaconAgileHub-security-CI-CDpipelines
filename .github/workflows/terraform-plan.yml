@@ -8,7 +8,7 @@ on:
 env:
   TF_WORKING_DIR: terraform
   AWS_REGION: us-east-1
-  AWS_ACCOUNT_ID: 005965605891
+  AWS_ACCOUNT_ID: "005965605891"
 
 permissions:
   id-token: write
