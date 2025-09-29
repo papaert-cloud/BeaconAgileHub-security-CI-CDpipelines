@@ -1,9 +1,10 @@
+---
 name: DAST - OWASP ZAP Full Scan
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 4 * * 1' # weekly on Monday
+    - cron: '0 4 * * 1'  # weekly on Monday
 
 jobs:
   zap-scan:

@@ -1,8 +1,9 @@
+---
 name: SBOM & SCA Pipeline
 
 on:
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 env:
   AWS_REGION: us-east-1
@@ -24,11 +25,7 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsOIDCRole
           aws-region: ${{ env.AWS_REGION }}
-      - name: Set ARTIFACT_BUCKET from secrets (if provided)
-        run: |
-          if [ -n "${{ secrets.ARTIFACT_BUCKET }}" ]; then
-            echo "ARTIFACT_BUCKET=${{ secrets.ARTIFACT_BUCKET }}" >> $GITHUB_ENV
-          fi
+      # Note: ARTIFACT_BUCKET can be set in repository variables if needed
       - name: Install syft & grype
         run: |
           # Pin versions to reduce surprises; change versions as needed

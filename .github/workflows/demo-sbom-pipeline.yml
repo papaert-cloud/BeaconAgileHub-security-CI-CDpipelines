@@ -1,9 +1,10 @@
+---
 name: Demo SBOM pipeline
 
 on:
   workflow_dispatch:
   push:
-    branches: [ main, docs-reorg ]
+    branches: [main, docs-reorg]
 
 permissions:
   id-token: write   # required for GitHub OIDC
@@ -23,14 +24,17 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsOIDCRole
+          role-to-assume: >
+            arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsOIDCRole
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Set up syft + trivy
         run: |
           sudo apt-get update && sudo apt-get install -y jq
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+            | sh -s -- -b /usr/local/bin
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b /usr/local/bin
 
       - name: Generate SBOM (syft)
         run: |
@@ -44,7 +48,8 @@ jobs:
 
       - name: Upload artifacts to S3 via OIDC
         env:
-          S3_URI: s3://REPLACE-ME-demo-bucket/${{ github.repository }}/${{ github.run_id }}/
+          S3_URI: >
+            s3://REPLACE-ME-demo-bucket/${{ github.repository }}/${{ github.run_id }}/
         run: |
           echo "Uploading artifacts to $S3_URI"
           mkdir -p output

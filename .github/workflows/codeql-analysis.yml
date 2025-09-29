@@ -1,10 +1,16 @@
+---
 name: CodeQL Analysis
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
 
 jobs:
   analyze:
@@ -15,8 +21,6 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          # The token is used by the action to upload results and for authenticated API access.
-          token: ${{ secrets.GITHUB_TOKEN }}
           languages: javascript, python
       - name: Autobuild
         uses: github/codeql-action/autobuild@v3
