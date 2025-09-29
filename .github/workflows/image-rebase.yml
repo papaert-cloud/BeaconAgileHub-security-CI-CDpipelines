@@ -3,7 +3,7 @@ name: Image Rebase & Rebuild
 
 on:
   schedule:
-    - cron: '0 6 * * 0' # weekly
+    - cron: '0 6 * * 0'  # weekly
 
 jobs:
   rebase:

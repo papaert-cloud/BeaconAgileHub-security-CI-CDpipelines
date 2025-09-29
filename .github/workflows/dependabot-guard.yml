@@ -79,7 +79,8 @@ jobs:
              --arg commit "${{ github.sha }}" \
              --arg workflow "${{ github.workflow }}" \
              --arg run_id "${{ github.run_id }}" \
-             '. + {"buildMetadata": {"timestamp": $timestamp, "commit": $commit, "workflow": $workflow, "run_id": $run_id}}' \
+             '. + {"buildMetadata": {"timestamp": $timestamp, "commit": $commit,
+               "workflow": $workflow, "run_id": $run_id}}' \
              sbom.json > sbom-enhanced.json
 
       - name: 🔍 Multi-Scanner Vulnerability Assessment (SI-2, SI-4)
@@ -206,14 +207,17 @@ jobs:
                       'version': match.get('artifact', {}).get('version', ''),
                       'severity': severity,
                       'cvss_score': cvss_score,
-                      'epss_score': epss_data.get(cve_id, {}).get('epss_score', 0),
+                      'epss_score': epss_data.get(cve_id, {}).get('epss_score',
+                        0),
                       'priority': priority,
                       'sla_hours': sla_hours,
-                      'autonomous_action': 'AUTO_MERGE' if priority in ['P3-LOW', 'P2-MEDIUM'] else 'HUMAN_REVIEW'
+                      'autonomous_action':: >
+                        'AUTO_MERGE' if priority in ['P3-LOW', 'P2-MEDIUM'] else 'HUMAN_REVIEW'
                   })
 
           # Sort by priority
-          priority_order = {'P0-CRITICAL': 0, 'P1-HIGH': 1, 'P2-MEDIUM': 2, 'P3-LOW': 3}
+          priority_order = {'P0-CRITICAL': 0, 'P1-HIGH': 1, 'P2-MEDIUM': 2,
+            'P3-LOW': 3}
           prioritized_vulns.sort(key=lambda x: priority_order.get(x['priority'], 4))
 
           # Save results
@@ -310,7 +314,8 @@ jobs:
           summary = f'''## 🤖 Autonomous AI Security Analysis (NIST + SLSA L3)
 
           **Package**: `{package_name}`
-          **Risk Level**: {{'CRITICAL': '🔴', 'HIGH': '🟠', 'MEDIUM': '🟡', 'LOW': '🟢'}}[risk_level] **{risk_level}**
+          **Risk Level**: {{'CRITICAL': '🔴', 'HIGH': '🟠', 'MEDIUM': '🟡', 'LOW':
+            '🟢'}}[risk_level] **{risk_level}**
           **Autonomous Decision**: {action}
           **SLA**: {sla}
 
@@ -318,14 +323,18 @@ jobs:
           - **Total Vulnerabilities**: {total_vulns}
           - **P0-Critical**: {p0_critical} (4h SLA)
           - **P1-High**: {p1_high} (24h SLA)
-          - **P2-Medium**: {len([v for v in epss_data if v['priority'] == 'P2-MEDIUM'])} (72h SLA)
-          - **P3-Low**: {len([v for v in epss_data if v['priority'] == 'P3-LOW'])} (7d SLA)
+          - **P2-Medium**:
+             {len([v for v in epss_data if v['priority'] == 'P2-MEDIUM'])} (72h SLA)
+          - **P3-Low**:
+             {len([v for v in epss_data if v['priority'] == 'P3-LOW'])} (7d SLA)
 
           ### 🏛️ NIST Compliance Status
           - **SI-2 (Flaw Remediation)**: ✅ Automated EPSS prioritization
           - **SI-7 (Software Integrity)**: ✅ SLSA L3 SBOM + attestations
-          - **CM-8 (Component Inventory)**: ✅ {len(sbom_data.get('artifacts', []))} components tracked
-          - **SA-10 (License Compliance)**: {{'COMPLIANT': '✅', 'NON_COMPLIANT': '❌'}}[license_data['status']] {license_data['status']}
+          - **CM-8 (Component Inventory)**:
+             ✅ {len(sbom_data.get('artifacts', []))} components tracked
+          - **SA-10 (License Compliance)**:
+             {{'COMPLIANT': '✅', 'NON_COMPLIANT': '❌'}}[license_data['status']] {license_data['status']}
 
           ### 🔐 SLSA Level 3 Evidence
           - **Build Provenance**: ✅ Cryptographically signed
@@ -367,43 +376,54 @@ jobs:
               'controls_implemented': {
                   'SI-2': {
                       'name': 'Flaw Remediation',
-                      'implementation': 'EPSS-prioritized automated vulnerability management',
-                      'evidence': ['epss-analysis.json', 'vulnerability-assessment.json'],
+                      'implementation':: >
+                        'EPSS-prioritized automated vulnerability management',
+                      'evidence':: >
+                        ['epss-analysis.json', 'vulnerability-assessment.json'],
                       'status': 'IMPLEMENTED',
                       'automation_level': 'FULLY_AUTOMATED'
                   },
                   'SI-3': {
                       'name': 'Malicious Code Protection',
-                      'implementation': 'Multi-scanner vulnerability detection + SBOM verification',
-                      'evidence': ['grype-results.json', 'osv-results.json', 'sbom-slsa.spdx.json'],
+                      'implementation':: >
+                        'Multi-scanner vulnerability detection + SBOM verification',
+                      'evidence':: >
+                        ['grype-results.json', 'osv-results.json', 'sbom-slsa.spdx.json'],
                       'status': 'IMPLEMENTED',
                       'automation_level': 'FULLY_AUTOMATED'
                   },
                   'SI-4': {
                       'name': 'Information System Monitoring',
-                      'implementation': 'Continuous dependency monitoring via GitHub Actions',
-                      'evidence': ['workflow-execution-logs', 'real-time-alerts'],
+                      'implementation':: >
+                        'Continuous dependency monitoring via GitHub Actions',
+                      'evidence': ['workflow-execution-logs',
+                        'real-time-alerts'],
                       'status': 'IMPLEMENTED',
                       'automation_level': 'FULLY_AUTOMATED'
                   },
                   'SI-7': {
                       'name': 'Software, Firmware, and Information Integrity',
-                      'implementation': 'SLSA L3 build provenance + cryptographic attestations',
+                      'implementation':: >
+                        'SLSA L3 build provenance + cryptographic attestations',
                       'evidence': ['build-provenance', 'signed-attestations'],
                       'status': 'IMPLEMENTED',
                       'automation_level': 'FULLY_AUTOMATED'
                   },
                   'CM-8': {
                       'name': 'Information System Component Inventory',
-                      'implementation': 'Automated SBOM generation with SPDX compliance',
-                      'evidence': ['sbom-slsa.spdx.json', 'component-inventory'],
+                      'implementation': 'Automated SBOM generation with SPDX
+                        compliance',
+                      'evidence': ['sbom-slsa.spdx.json',
+                        'component-inventory'],
                       'status': 'IMPLEMENTED',
                       'automation_level': 'FULLY_AUTOMATED'
                   },
                   'SA-10': {
                       'name': 'Developer Configuration Management',
-                      'implementation': 'Automated license compliance + supply chain verification',
-                      'evidence': ['license-compliance.json', 'supply-chain-verification'],
+                      'implementation':: >
+                        'Automated license compliance + supply chain verification',
+                      'evidence':: >
+                        ['license-compliance.json', 'supply-chain-verification'],
                       'status': 'IMPLEMENTED',
                       'automation_level': 'FULLY_AUTOMATED'
                   }
@@ -464,7 +484,7 @@ jobs:
             --body "Autonomous AI analysis detected high-risk dependency requiring immediate attention.
 
           **Risk Level**: ${{ steps.analysis.outputs.risk_level }}
-          **PR**: #${{ github.event.pull_request.number }}
+          **PR**:  #${{ github.event.pull_request.number }}
           **Evidence**: See compliance artifacts
 
           **Required Actions**:

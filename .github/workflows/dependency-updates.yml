@@ -3,7 +3,7 @@ name: Dependency Updates (scheduled)
 
 on:
   schedule:
-    - cron: '0 2 * * 0' # weekly
+    - cron: '0 2 * * 0'  # weekly
 
 jobs:
   dep-update:

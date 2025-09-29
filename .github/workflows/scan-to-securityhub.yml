@@ -35,7 +35,8 @@ jobs:
         run: |
           python3 github-actions/devsecops/solution-05-security-platform/scripts/grype_to_asff.py --input grype.json --output asff.json
 
-      - name: Publish findings to Security Hub (requires role with securityhub:BatchImportFindings)
+      - name:
+         Publish findings to Security Hub (requires role with securityhub:BatchImportFindings)
         run: |
           # Configure creds via OIDC role with Security Hub permissions
           aws sts get-caller-identity
