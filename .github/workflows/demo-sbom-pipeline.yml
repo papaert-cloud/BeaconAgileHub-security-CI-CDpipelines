@@ -34,10 +34,12 @@ jobs:
 
       - name: Generate SBOM (syft)
         run: |
+          mkdir -p output
           syft . -o json > output/sbom.json
 
       - name: Scan (trivy)
         run: |
+          mkdir -p output
           trivy filesystem --format json -o output/scan.json . || true
 
       - name: Upload artifacts to S3 via OIDC
