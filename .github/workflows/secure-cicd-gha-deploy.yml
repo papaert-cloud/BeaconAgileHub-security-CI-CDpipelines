@@ -49,8 +49,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: terraform fmt and validate
-        working-directory: >
-          Infra/solutions/scenario-s003-000-secure-cicd-gha/terraform
+        working-directory: Infra/solutions/scenario-s003-000-secure-cicd-gha/terraform
         run: |
           terraform init -input=false
           terraform fmt -recursive
@@ -70,13 +69,9 @@ jobs:
       - name: Install Terraform and Terragrunt
         run: |
           sudo apt-get update && sudo apt-get install -y unzip
-curl -Lo tf.zip \
-            https: >
-              //releases.hashicorp.com/terraform/1.6.0/terraform_1.6.0_linux_amd64.zip
+          curl -Lo tf.zip https://releases.hashicorp.com/terraform/1.6.0/terraform_1.6.0_linux_amd64.zip
           unzip tf.zip -d /usr/local/bin
-curl -Lo terragrunt \
-            https: >
-              //github.com/gruntwork-io/terragrunt/releases/download/v0.45.0/terragrunt_linux_amd64
+          curl -Lo terragrunt https://github.com/gruntwork-io/terragrunt/releases/download/v0.45.0/terragrunt_linux_amd64
           chmod +x terragrunt && sudo mv terragrunt /usr/local/bin/
       - name: Terragrunt apply (plan only by default)
         env:
