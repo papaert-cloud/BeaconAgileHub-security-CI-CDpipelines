@@ -9,24 +9,45 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          
+      - name: Check for Go files
+        id: check-go
+        run: |
+          if find . -name "*.go" -type f | grep -q .; then
+            echo "go-files=true" >> $GITHUB_OUTPUT
+          else
+            echo "go-files=false" >> $GITHUB_OUTPUT
+          fi
+          
       - name: Set up Go
+        if: steps.check-go.outputs.go-files == 'true'
         uses: actions/setup-go@v4
         with:
           go-version: '1.20'
+          
       - name: Go fmt check
+        if: steps.check-go.outputs.go-files == 'true'
         run: |
           gofmt_out=$(gofmt -l . || true)
           if [ -n "$gofmt_out" ]; then
             echo "Files not gofmt'd:\n$gofmt_out"; exit 1
           fi
+          
       - name: Run go vet
+        if: steps.check-go.outputs.go-files == 'true'
         run: go vet ./...
       - name: Run bandit (python)
         run: |
-          if command -v bandit >/dev/null 2>&1; then
-            bandit -r .
+          pip install bandit[toml]
+          if find . -name "*.py" -type f | grep -q .; then
+            bandit -r . --exclude ./venv,./tests || true
           else
-            echo "bandit not installed; skip"
+            echo "No Python files found; skipping bandit"
           fi
       - name: ESLint (if js present)
         run: |

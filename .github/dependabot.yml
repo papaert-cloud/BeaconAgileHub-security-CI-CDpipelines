@@ -16,8 +16,8 @@ updates:
       prefix: "deps"
       include: "scope"
     
-  # Node.js dependencies  
-  - package-ecosystem: "npm"
+  # Terraform dependencies
+  - package-ecosystem: "terraform"
     directory: "/"
     schedule:
       interval: "weekly"
@@ -26,39 +26,23 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
-      - "javascript"
+      - "terraform"
       - "autonomous-ai"
     commit-message:
       prefix: "deps"
       include: "scope"
       
-  # Go dependencies
-  - package-ecosystem: "gomod"
-    directory: "/"
+  # Docker dependencies
+  - package-ecosystem: "docker"
+    directory: "/dockers"
     schedule:
       interval: "weekly"
       day: "monday"
       time: "06:00"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
     labels:
       - "dependencies"
-      - "go"
-      - "autonomous-ai"
-    commit-message:
-      prefix: "deps"
-      include: "scope"
-      
-  # Rust dependencies
-  - package-ecosystem: "cargo"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "06:00"
-    open-pull-requests-limit: 5
-    labels:
-      - "dependencies"
-      - "rust"
+      - "docker"
       - "autonomous-ai"
     commit-message:
       prefix: "deps"

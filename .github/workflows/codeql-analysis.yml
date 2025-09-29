@@ -17,7 +17,7 @@ jobs:
         with:
           # The token is used by the action to upload results and for authenticated API access.
           token: ${{ secrets.GITHUB_TOKEN }}
-          languages: go, javascript, python
+          languages: javascript, python
       - name: Autobuild
         uses: github/codeql-action/autobuild@v3
       - name: Perform CodeQL Analysis
