@@ -441,7 +441,7 @@ jobs:
 
       - name: 🔐 SLSA Level 3 Attestation Generation
         id: slsa
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v3
         with:
           subject-path: |
             sbom-slsa.spdx.json
