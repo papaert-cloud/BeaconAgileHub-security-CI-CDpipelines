@@ -11,7 +11,7 @@ module "github_oidc" {
   create_oidc_provider = false  # Use existing provider
   account_id            = "005965605891"
   aws_region            = "us-east-1"
-  github_repo           = "papaert-cloud/Generic"
+  github_repo           = "papaert-cloud/peter-security-CI-CDpipelines"
   role_name             = "GitHubActionsOIDCRole"
   github_sub_suffix     = "*"
 

@@ -10,7 +10,7 @@
       "Condition": {
         "StringEquals": {
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-          "token.actions.githubusercontent.com:sub": "repo:BAMG-Studio/sbom-security-pipeline:ref:refs/heads/main"
+          "token.actions.githubusercontent.com:sub": "repo:papaert-cloud/peter-security-CI-CDpipelines:ref:refs/heads/main"
         }
       }
     }

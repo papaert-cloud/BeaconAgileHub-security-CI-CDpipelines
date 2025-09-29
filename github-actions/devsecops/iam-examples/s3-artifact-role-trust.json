@@ -9,7 +9,7 @@
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
         "StringLike": {
-          "token.actions.githubusercontent.com:sub": "repo:papaert-cloud/Generic:*"
+          "token.actions.githubusercontent.com:sub": "repo:papaert-cloud/peter-security-CI-CDpipelines:*"
         }
       }
     }
