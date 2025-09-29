@@ -1,3 +1,4 @@
+---
 name: Image Rebase & Rebuild
 
 on:
@@ -10,7 +11,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Find images using base image
-        run: echo "Find images dependent on base image and rebuild with updated base"
+        run: >
+          echo "Find images dependent on base image and rebuild with updated base"
       - name: Rebuild, scan, sign
         run: |
           # Rebuild images, run syft/grype, cosign sign, push to ECR

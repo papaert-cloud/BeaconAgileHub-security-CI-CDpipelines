@@ -1,3 +1,4 @@
+---
 name: pytest-demo-sbom
 
 on:
@@ -23,18 +24,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pytest
-          if [ -f solutions/demo-sbom-lab/requirements.txt ]; then
+          if [-f solutions/demo-sbom-lab/requirements.txt]; then
             pip install -r solutions/demo-sbom-lab/requirements.txt
           fi
-          if [ -f requirements.txt ]; then
+          if [-f requirements.txt]; then
             pip install -r requirements.txt
           fi
 
       - name: Run pytest
         run: |
-          if [ -d solutions/demo-sbom-lab/tests ]; then
+          if [-d solutions/demo-sbom-lab/tests]; then
             pytest solutions/demo-sbom-lab/tests/ -q --maxfail=1
-          elif [ -d tests ]; then
+          elif [-d tests]; then
             pytest tests/ -q --maxfail=1
           else
             echo "No tests directory found - creating a simple test"

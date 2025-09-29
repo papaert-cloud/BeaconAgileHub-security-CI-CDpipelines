@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Wait for Docker to be ready
         run: |
           until docker info >/dev/null 2>&1; do
@@ -19,16 +19,16 @@ jobs:
             sleep 2
           done
           echo "Docker is ready"
-      
+
       - name: Start ZAP Docker
         run: |
           docker run -d --name zap -p 8080:8080 owasp/zap2docker-stable:latest zap.sh -daemon -host 0.0.0.0 -port 8080
-          
+
       - name: Wait for ZAP to be ready
         run: |
           echo "Waiting for ZAP to start..."
           sleep 30
-          
+
       - name: Run ZAP baseline scan
         run: |
           # Create a simple test target since we don't have a real staging environment

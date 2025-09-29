@@ -1,8 +1,9 @@
+---
 name: SonarQube Scan (optional)
 
 on:
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   sonar:
@@ -19,7 +20,7 @@ jobs:
           # set SONAR_TOKEN in repo secrets if enabling
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
-          if [ -n "${SONAR_TOKEN:-}" ]; then
+          if [-n "${SONAR_TOKEN:-}"]; then
             # placeholder for sonar-scanner invocation
             echo "Run sonar-scanner with project config"
           else
