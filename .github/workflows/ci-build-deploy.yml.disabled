@@ -48,8 +48,10 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsOIDCRole
           aws-region: ${{ env.AWS_REGION }}
-          mask-aws-account-id: true
-          output-credentials: false
+          mask-aws-account-id: 'true'
+          output-credentials: 'false'
+        env:
+          ACTIONS_STEP_DEBUG: false
 
       - name: Install Syft
         run: |
