@@ -3,6 +3,7 @@ set -e
 
 TAG=${1:-latest}
 echo "Building with tag: $TAG"
+echo "Script called with parameters: $@"
 
 # Create artifacts directory
 mkdir -p artifacts

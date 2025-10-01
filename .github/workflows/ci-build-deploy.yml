@@ -51,11 +51,15 @@ jobs:
           mask-aws-account-id: true
           output-credentials: false
 
+      - name: Install Syft
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sudo sh -s -- -b /usr/local/bin
+          
       - name: Build and push image
         run: |
           mkdir -p artifacts
           chmod +x ./github-actions/devops/solution-01-ci-build-deploy/scripts/build_and_push.sh
-          ./github-actions/devops/solution-01-ci-build-deploy/scripts/build_and_push.sh --tag ${{ github.sha }}
+          ./github-actions/devops/solution-01-ci-build-deploy/scripts/build_and_push.sh ${{ github.sha }}
 
       - name: Upload SBOM & metadata to S3 (artifact storage)
         run: |
