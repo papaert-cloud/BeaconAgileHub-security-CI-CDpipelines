@@ -26,6 +26,8 @@ jobs:
           role-to-assume: >
             arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsOIDCRole
           aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
+          output-credentials: false
 
       - name: Install tools
         run: |
