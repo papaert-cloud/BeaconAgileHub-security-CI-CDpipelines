@@ -1,0 +1,5 @@
+---
+# Demo SBOM Lab Configuration
+name: demo-sbom-lab
+version: "1.0.0"
+description: DevSecOps SBOM generation demo

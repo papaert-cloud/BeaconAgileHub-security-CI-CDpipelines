@@ -1,0 +1,15 @@
+---
+- name: Quick DevSecOps Test
+  hosts: localhost
+  gather_facts: false
+  
+  tasks:
+    - name: Generate SBOM
+      ansible.builtin.shell: syft . -o cyclonedx-json=quick-sbom.json
+      
+    - name: Scan vulnerabilities  
+      ansible.builtin.shell: grype sbom:quick-sbom.json -o json > quick-vulns.json
+      
+    - name: Show results
+      ansible.builtin.debug:
+        msg: "DevSecOps scan complete - check quick-sbom.json and quick-vulns.json"
