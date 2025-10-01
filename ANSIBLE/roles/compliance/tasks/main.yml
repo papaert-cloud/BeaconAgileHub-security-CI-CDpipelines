@@ -1,0 +1,16 @@
+---
+- name: IEC 62443 Industrial Control Systems Security
+  include_tasks: iec-62443.yml
+  when: iec_62443_enabled | default(true)
+
+- name: CIS Benchmarks compliance
+  include_tasks: cis-benchmarks.yml
+  when: cis_enabled | default(true)
+
+- name: SLSA Level 3 compliance
+  include_tasks: slsa-level3.yml
+  when: slsa_enabled | default(true)
+
+- name: NERC CIP compliance
+  include_tasks: nerc-cip.yml
+  when: nerc_cip_enabled | default(false)

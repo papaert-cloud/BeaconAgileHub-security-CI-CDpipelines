@@ -1,0 +1,19 @@
+---
+- name: Implement ICS network segmentation (IEC 62443-3-2)
+  include_tasks: network-zones.yml
+  vars:
+    security_zones:
+      - zone: "safety_instrumented_system"
+        level: "SL3"
+      - zone: "basic_process_control"
+        level: "SL2"
+      - zone: "manufacturing_operations"
+        level: "SL1"
+
+- name: Deploy security monitoring (IEC 62443-2-4)
+  include_tasks: security-monitoring.yml
+  vars:
+    monitoring_requirements:
+      - detect_unauthorized_access
+      - log_security_events
+      - alert_on_anomalies

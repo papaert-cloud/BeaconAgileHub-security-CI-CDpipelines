@@ -1,0 +1,75 @@
+---
+- name: Install Infracost
+  ansible.builtin.get_url:
+    url: "https://github.com/infracost/infracost/releases/latest/download/infracost-linux-amd64.tar.gz"
+    dest: /tmp/infracost.tar.gz
+
+- name: Extract Infracost
+  ansible.builtin.unarchive:
+    src: /tmp/infracost.tar.gz
+    dest: /usr/local/bin
+    remote_src: true
+    creates: /usr/local/bin/infracost
+  become: true
+
+- name: Configure Infracost API key
+  ansible.builtin.shell: |
+    infracost configure set api_key {{ infracost_api_key }}
+  environment:
+    INFRACOST_API_KEY: "{{ infracost_api_key }}"
+  when: infracost_api_key is defined
+
+- name: Generate Terraform plan for cost analysis
+  community.general.terraform:
+    project_path: "{{ terraform_project_path | default('.') }}"
+    state: planned
+    plan_file: "{{ artifacts_path | default('./artifacts') }}/tfplan"
+    variables: "{{ terraform_vars | default({}) }}"
+  register: terraform_plan
+
+- name: Convert Terraform plan to JSON
+  ansible.builtin.shell: |
+    terraform show -json {{ artifacts_path | default('./artifacts') }}/tfplan > {{ artifacts_path | default('./artifacts') }}/plan.json
+  args:
+    chdir: "{{ terraform_project_path | default('.') }}"
+
+- name: Generate Infracost breakdown
+  ansible.builtin.shell: |
+    infracost breakdown --path={{ terraform_project_path | default('.') }} \
+      --format=json \
+      --out-file={{ artifacts_path | default('./artifacts') }}/infracost.json
+  register: infracost_breakdown
+
+- name: Parse cost analysis results
+  ansible.builtin.shell: |
+    python3 -c "
+    import json
+    with open('{{ artifacts_path | default('./artifacts') }}/infracost.json') as f:
+        data = json.load(f)
+    total_cost = data.get('totalMonthlyCost', '0')
+    print(f'Estimated monthly cost: ${total_cost}')
+    if float(total_cost or 0) > {{ cost_threshold | default(50.0) }}:
+        print(f'WARNING: Cost exceeds threshold of ${{ cost_threshold | default(50.0) }}')
+        exit(1)
+    "
+  register: cost_check
+  failed_when: cost_check.rc != 0 and fail_on_cost_threshold | default(false)
+
+- name: Generate cost optimization recommendations
+  ansible.builtin.shell: |
+    infracost breakdown --path={{ terraform_project_path | default('.') }} \
+      --format=table \
+      --show-skipped
+  register: cost_recommendations
+
+- name: Display cost analysis summary
+  ansible.builtin.debug:
+    msg: |
+      Cost Analysis Summary:
+      {{ cost_recommendations.stdout }}
+      
+      Recommendations:
+      - Review instance types for right-sizing opportunities
+      - Consider Reserved Instances for long-running workloads
+      - Implement auto-scaling for variable workloads
+      - Use Spot Instances for fault-tolerant workloads

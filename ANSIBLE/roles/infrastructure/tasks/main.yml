@@ -1,0 +1,12 @@
+---
+- name: Terraform operations
+  include_tasks: terraform-ops.yml
+  when: terraform_enabled | default(true)
+
+- name: Cost analysis
+  include_tasks: cost-analysis.yml
+  when: cost_analysis_enabled | default(true)
+
+- name: Infrastructure compliance
+  include_tasks: compliance-check.yml
+  when: compliance_check_enabled | default(true)

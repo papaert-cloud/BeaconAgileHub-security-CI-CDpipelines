@@ -1,0 +1,64 @@
+---
+- name: Security Gates Orchestration
+  hosts: localhost
+  gather_facts: false
+  vars:
+    aws_region: "{{ ansible_env.AWS_REGION | default('us-east-1') }}"
+    aws_account_id: "{{ ansible_env.AWS_ACCOUNT_ID | default('005965605891') }}"
+    github_run_id: "{{ ansible_env.GITHUB_RUN_ID | default('local-run') }}"
+    artifact_bucket: "{{ ansible_env.ARTIFACT_BUCKET | default('') }}"
+
+  tasks:
+  - name: "Phase 1: Container Build & SBOM Generation"
+    include_role:
+      name: ../roles/container-security
+      tasks_from: sbom-generation
+    vars:
+      container_image: "app:{{ github_run_id }}"
+      sbom_format: "cyclonedx-json"
+      
+  - name: "Phase 2: Vulnerability Scanning"
+    include_role:
+      name: security-scanning
+      tasks_from: vulnerability-scan
+    vars:
+      scan_targets:
+        - type: "container"
+          target: "app:{{ github_run_id }}"
+        - type: "filesystem"
+          target: "{{ playbook_dir }}/../.."
+          
+  - name: "Phase 3: SAST Analysis"
+    include_role:
+      name: security-scanning
+      tasks_from: sast-scan
+    vars:
+      sast_tools:
+        - semgrep
+        - sonarqube
+        - codeql
+        
+  - name: "Phase 4: Compliance Validation"
+    include_role:
+      name: compliance
+      tasks_from: validate-standards
+    vars:
+      compliance_frameworks:
+        - slsa_level_3
+        - iec_62443
+        - cis_benchmarks
+        
+  - name: "Phase 5: Security Hub Integration"
+    include_role:
+      name: security-scanning
+      tasks_from: security-hub-upload
+    vars:
+      findings_path: "{{ playbook_dir }}/artifacts"
+      
+  - name: "Phase 6: Cost Analysis"
+    include_role:
+      name: infrastructure
+      tasks_from: cost-analysis
+    vars:
+      infracost_enabled: true
+      cost_threshold: 50.00

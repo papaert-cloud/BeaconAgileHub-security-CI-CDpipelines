@@ -1,0 +1,22 @@
+---
+- name: DevSecOps Master Orchestrator
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+  - name: "Phase 1: Configuration & Provisioning"
+    include: infrastructure.yml
+    tags: [configuration, provisioning]
+
+  - name: "Phase 2: Development Security Gates"
+    include: security-gates.yml
+    tags: [development, security]
+
+  - name: "Phase 3: Testing & Validation"
+    include: compliance.yml
+    tags: [testing, validation]
+
+  - name: "Phase 4: Monitoring & Observability"
+    include: monitoring-setup.yml
+    tags: [monitoring, observability]
+    when: setup_monitoring | default(false)

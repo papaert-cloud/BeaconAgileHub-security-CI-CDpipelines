@@ -1,0 +1,14 @@
+[local]
+localhost ansible_connection=local
+
+[aws_instances]
+# Add your AWS instances here when needed
+
+[containers]
+# Docker containers for testing
+
+[all:vars]
+ansible_python_interpreter=/usr/bin/python3
+environment=dev
+aws_region=us-east-1
+aws_account_id=005965605891

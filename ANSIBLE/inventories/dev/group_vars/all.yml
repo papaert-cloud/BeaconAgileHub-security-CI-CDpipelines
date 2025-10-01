@@ -1,0 +1,18 @@
+---
+# Development environment specific variables
+environment: dev
+debug_mode: true
+fail_on_cost_threshold: false
+fail_on_high_severity: false
+
+# AWS settings for dev
+aws_region: us-east-1
+aws_account_id: "005965605891"
+
+# Security settings - more permissive for dev
+vulnerability_threshold: "MEDIUM"
+compliance_enforcement: false
+
+# Cost settings
+cost_threshold: 50.00
+cost_alerts_enabled: true

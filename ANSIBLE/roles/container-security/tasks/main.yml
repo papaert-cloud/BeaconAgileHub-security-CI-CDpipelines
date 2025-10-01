@@ -1,0 +1,15 @@
+---
+- name: Install container security tools
+  include_tasks: install-tools.yml
+
+- name: Generate SBOM
+  include_tasks: sbom-generation.yml
+  when: generate_sbom | default(true)
+
+- name: Scan container vulnerabilities
+  include_tasks: vulnerability-scan.yml
+  when: scan_vulnerabilities | default(true)
+
+- name: Container hardening
+  include_tasks: container-hardening.yml
+  when: apply_hardening | default(true)

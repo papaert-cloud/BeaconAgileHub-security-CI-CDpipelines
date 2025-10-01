@@ -1,0 +1,26 @@
+---
+# Global variables for all environments
+aws_region: "{{ ansible_env.AWS_REGION | default('us-east-1') }}"
+aws_account_id: "{{ ansible_env.AWS_ACCOUNT_ID | default('005965605891') }}"
+
+# Security settings
+fail_on_high_severity: true
+fail_on_cost_threshold: false
+cost_threshold: 50.00
+
+# Tool versions
+syft_version: "v0.92.0"
+grype_version: "v0.74.0"
+terraform_version: "1.5.7"
+
+# Paths
+artifacts_path: "./artifacts"
+terraform_project_path: "."
+
+# Feature flags
+generate_sbom: true
+scan_vulnerabilities: true
+apply_hardening: true
+terraform_enabled: true
+cost_analysis_enabled: true
+compliance_check_enabled: true

@@ -1,0 +1,78 @@
+---
+- name: Create artifacts directory
+  ansible.builtin.file:
+    path: "{{ artifacts_path | default('./artifacts') }}"
+    state: directory
+    mode: '0755'
+
+- name: Install Syft for SBOM generation
+  ansible.builtin.get_url:
+    url: "https://raw.githubusercontent.com/anchore/syft/main/install.sh"
+    dest: /tmp/install-syft.sh
+    mode: '0755'
+
+- name: Execute Syft installer
+  ansible.builtin.shell: |
+    SYFT_VER="{{ syft_version | default('v0.92.0') }}"
+    sh /tmp/install-syft.sh -b /usr/local/bin ${SYFT_VER}
+  become: true
+
+- name: Build container image if Dockerfile exists
+  community.docker.docker_image:
+    name: "{{ container_image | default('app:latest') }}"
+    build:
+      path: "{{ dockerfile_path | default('.') }}"
+      dockerfile: "{{ dockerfile_name | default('Dockerfile') }}"
+    source: build
+  when: build_image | default(true)
+
+- name: Generate SBOM with Syft
+  ansible.builtin.shell: |
+    syft {{ container_image | default('app:latest') }} \
+      -o {{ sbom_format | default('cyclonedx-json') }}={{ artifacts_path | default('./artifacts') }}/sbom.cyclonedx.json
+  register: sbom_generation
+
+- name: Install Grype for vulnerability scanning
+  ansible.builtin.get_url:
+    url: "https://raw.githubusercontent.com/anchore/grype/main/install.sh"
+    dest: /tmp/install-grype.sh
+    mode: '0755'
+
+- name: Execute Grype installer
+  ansible.builtin.shell: |
+    GRYPE_VER="{{ grype_version | default('v0.74.0') }}"
+    sh /tmp/install-grype.sh -b /usr/local/bin ${GRYPE_VER}
+  become: true
+
+- name: Run Grype vulnerability scan on SBOM
+  ansible.builtin.shell: |
+    grype sbom:{{ artifacts_path | default('./artifacts') }}/sbom.cyclonedx.json \
+      -o json > {{ artifacts_path | default('./artifacts') }}/grype.json
+  register: grype_scan
+
+- name: Check for high/critical vulnerabilities
+  ansible.builtin.shell: |
+    python3 -c "
+    import json, sys
+    with open('{{ artifacts_path | default('./artifacts') }}/grype.json') as f:
+        data = json.load(f)
+    high_critical = [m for m in data.get('matches', []) 
+                    if m.get('vulnerability', {}).get('severity') in ['High', 'Critical']]
+    if high_critical:
+        print(f'Found {len(high_critical)} high/critical vulnerabilities')
+        sys.exit(1)
+    print('No high/critical vulnerabilities found')
+    "
+  register: vulnerability_check
+  failed_when: vulnerability_check.rc != 0 and fail_on_high_severity | default(true)
+
+- name: Upload artifacts to S3 if bucket specified
+  amazon.aws.s3_object:
+    bucket: "{{ artifact_bucket }}"
+    object: "{{ github_run_id | default('local-run') }}/{{ item }}"
+    src: "{{ artifacts_path | default('./artifacts') }}/{{ item }}"
+    mode: put
+  loop:
+    - sbom.cyclonedx.json
+    - grype.json
+  when: artifact_bucket is defined and artifact_bucket != ""
