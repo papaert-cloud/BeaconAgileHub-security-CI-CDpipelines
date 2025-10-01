@@ -1,0 +1,53 @@
+---
+name: Ansible Security Orchestration
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: "005965605891"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  ansible-security-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: >
+            arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsOIDCRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install Ansible
+        run: |
+          python -m pip install --upgrade pip
+          pip install ansible>=8.0.0
+
+      - name: Install Ansible collections
+        run: |
+          cd ANSIBLE
+          ansible-galaxy collection install -r requirements.yml
+
+      - name: Execute Ansible Security Gates
+        run: |
+          cd ANSIBLE
+          ansible-playbook -i inventories/dev/hosts \
+                           playbooks/security-gates.yml \
+                           --extra-vars "github_run_id=${{ github.run_id }}" \
+                           --extra-vars "github_repository=${{ github.repository }}" \
+                           --extra-vars "environment=dev"
+
+      - name: Upload Ansible artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ansible-security-results
+          path: ANSIBLE/artifacts/

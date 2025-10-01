@@ -1,0 +1,52 @@
+---
+name: Ansible DevSecOps Integration
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: "005965605891"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  ansible-devsecops:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: >
+            arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsOIDCRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install tools
+        run: |
+          sudo apt update
+          sudo apt install -y ansible python3-boto3
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sudo sh -s -- -b /usr/local/bin
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sudo sh -s -- -b /usr/local/bin
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
+
+      - name: Install Ansible collections
+        run: |
+          cd ANSIBLE
+          ansible-galaxy collection install -r requirements.yml
+
+      - name: Run DevSecOps Demo
+        run: |
+          cd ANSIBLE/scenarios/working-demo
+          ansible-playbook playbook.yml
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: devsecops-results
+          path: ANSIBLE/scenarios/working-demo/*.json

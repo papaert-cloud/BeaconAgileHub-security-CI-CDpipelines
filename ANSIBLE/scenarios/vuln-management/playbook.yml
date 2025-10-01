@@ -1,0 +1,20 @@
+---
+- name: EPSS-Based Vulnerability Management
+  hosts: localhost
+  tasks:
+    - name: Get EPSS scores
+      ansible.builtin.uri:
+        url: "https://api.first.org/data/v1/epss?cve={{ cve_id }}"
+        method: GET
+      register: epss_data
+      when: cve_id is defined
+      
+    - name: Prioritize vulnerabilities
+      ansible.builtin.shell: |
+        python3 -c "
+        import json
+        epss = {{ epss_data.json | default('{}') }}
+        score = float(epss.get('data', [{}])[0].get('epss', 0))
+        priority = 'HIGH' if score > 0.7 else 'MEDIUM' if score > 0.3 else 'LOW'
+        print(f'Priority: {priority} (EPSS: {score})')
+        "

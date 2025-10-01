@@ -1,0 +1,22 @@
+---
+- name: Python Security Automation
+  hosts: localhost
+  gather_facts: false
+  
+  tasks:
+    - name: Run Semgrep SAST
+      ansible.builtin.shell: |
+        ~/.local/bin/semgrep --config=auto --json --output=sast-results.json .
+        
+    - name: Run OWASP ZAP DAST
+      ansible.builtin.shell: |
+        docker run -v $(pwd):/zap/wrk/:rw -t owasp/zap2docker-stable zap-baseline.py -t {{ target_url | default('http://localhost') }} -J dast-results.json
+      when: target_url is defined
+      
+    - name: Correlate findings
+      ansible.builtin.shell: |
+        python3 -c "
+        import json
+        sast = json.load(open('sast-results.json'))
+        print(f'SAST findings: {len(sast.get(\"results\", []))}')
+        "

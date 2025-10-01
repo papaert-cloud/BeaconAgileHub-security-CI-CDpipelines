@@ -1,0 +1,8 @@
+---
+- name: SAST scanning
+  include_tasks: sast-scan.yml
+  when: sast_enabled | default(true)
+
+- name: Security Hub upload
+  include_tasks: security-hub-upload.yml
+  when: securityhub_enabled | default(true)

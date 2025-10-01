@@ -45,8 +45,30 @@ jobs:
           cd $TF_WORKING_DIR
           terraform plan -out=tfplan
           terraform show -json tfplan > plan.json
-      - name: Upload Plan
+      - name: Setup Infracost
+        uses: infracost/actions/setup@v3
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
+          
+      - name: Generate Infracost diff
+        run: |
+          cd $TF_WORKING_DIR
+          infracost breakdown --path=. \
+            --format=json \
+            --out-file=/tmp/infracost.json
+            
+      - name: Post Infracost comment
+        if: github.event_name == 'pull_request'
+        run: |
+          infracost comment github --path=/tmp/infracost.json \
+            --repo=$GITHUB_REPOSITORY \
+            --github-token=${{ secrets.GITHUB_TOKEN }} \
+            --pull-request=${{ github.event.number }}
+            
+      - name: Upload Plan & Cost Analysis
         uses: actions/upload-artifact@v4
         with:
           name: terraform-plan
-          path: $TF_WORKING_DIR/plan.json
+          path: |
+            $TF_WORKING_DIR/plan.json
+            /tmp/infracost.json

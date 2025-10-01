@@ -1,0 +1,21 @@
+---
+- name: IaC Security & Terraform
+  hosts: localhost
+  tasks:
+    - name: Run Checkov scan
+      ansible.builtin.shell: |
+        checkov -f {{ terraform_file | default('main.tf') }} --framework terraform -o json > checkov-results.json
+        
+    - name: Run tfsec scan
+      ansible.builtin.shell: |
+        tfsec . --format json > tfsec-results.json
+        
+    - name: Terraform plan with cost analysis
+      community.general.terraform:
+        project_path: "{{ terraform_path | default('.') }}"
+        state: planned
+        plan_file: tfplan
+        
+    - name: Infracost analysis
+      ansible.builtin.shell: |
+        infracost breakdown --path={{ terraform_path | default('.') }} --format=json > cost-analysis.json

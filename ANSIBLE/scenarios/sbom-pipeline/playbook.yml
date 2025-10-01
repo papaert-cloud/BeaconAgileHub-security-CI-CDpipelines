@@ -1,0 +1,23 @@
+---
+- name: SBOM Generation Pipeline
+  hosts: localhost
+  gather_facts: false
+  vars:
+    github_run_id: "{{ ansible_env.GITHUB_RUN_ID | default('local-run') }}"
+    
+  tasks:
+    - name: Generate SBOM with Syft
+      ansible.builtin.shell: |
+        syft . -o cyclonedx-json=sbom.json
+        
+    - name: Scan with Grype
+      ansible.builtin.shell: |
+        grype sbom:sbom.json -o json > vulnerabilities.json
+        
+    - name: Upload to S3
+      amazon.aws.s3_object:
+        bucket: "{{ artifact_bucket }}"
+        object: "{{ github_run_id }}/sbom.json"
+        src: sbom.json
+        mode: put
+      when: artifact_bucket is defined

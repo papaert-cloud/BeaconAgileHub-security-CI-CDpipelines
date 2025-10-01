@@ -1,0 +1,51 @@
+# Infracost Analysis Configuration
+# Why it might have missed your charges:
+
+# 1. Missing infracost in CI/CD pipeline
+# Your terraform-plan.yml doesn't include infracost step
+
+# 2. Runtime resources not in Terraform
+# EBS volumes created outside Terraform aren't tracked
+
+# 3. Configuration issues:
+
+version: 0.1
+
+projects:
+  - path: .
+    name: lab-project
+    terraform_plan_flags: -var-file="terraform.tfvars"
+    
+# Common issues that cause missed costs:
+issues:
+  # 1. Manual resource creation (EC2 console)
+  manual_resources: "Resources created via AWS console bypass infracost"
+  
+  # 2. Missing configuration
+  no_ci_integration: "Infracost not integrated in GitHub Actions"
+  
+  # 3. Incomplete Terraform state
+  state_drift: "Terraform state doesn't match actual AWS resources"
+  
+  # 4. Usage-based pricing
+  usage_costs: "Data transfer, API calls, storage requests not estimated"
+
+# Solution: Add to workflow
+recommended_workflow_addition: |
+  - name: Setup Infracost
+    uses: infracost/actions/setup@v3
+    with:
+      api-key: ${{ secrets.INFRACOST_API_KEY }}
+      
+  - name: Generate Infracost diff
+    run: |
+      infracost diff --path=. \
+        --format=json \
+        --out-file=/tmp/infracost.json
+        
+  - name: Post Infracost comment
+    run: |
+      infracost comment github --path=/tmp/infracost.json \
+        --repo=$GITHUB_REPOSITORY \
+        --github-token=${{ secrets.GITHUB_TOKEN }} \
+        --pull-request=${{ github.event.number }}

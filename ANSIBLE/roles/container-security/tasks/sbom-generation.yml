@@ -5,6 +5,12 @@
     state: directory
     mode: '0755'
 
+- name: Create output directory for compatibility
+  ansible.builtin.file:
+    path: "./output"
+    state: directory
+    mode: '0755'
+
 - name: Install Syft for SBOM generation
   ansible.builtin.get_url:
     url: "https://raw.githubusercontent.com/anchore/syft/main/install.sh"

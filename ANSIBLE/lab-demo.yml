@@ -1,0 +1,13 @@
+---
+- name: DevSecOps Lab Demo - All Scenarios
+  hosts: localhost
+  gather_facts: false
+  
+  tasks:
+    - name: "Demo 1: SBOM Pipeline"
+      import_playbook: scenarios/sbom-pipeline/playbook.yml
+      tags: [sbom, demo]
+      
+    - name: "Demo 2: Container Security"
+      import_playbook: scenarios/container-security/playbook.yml
+      tags: [container, demo]

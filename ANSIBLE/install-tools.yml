@@ -1,0 +1,34 @@
+---
+- name: Install DevSecOps Tools
+  hosts: localhost
+  become: true
+  tasks:
+    - name: Install Python dependencies via apt
+      ansible.builtin.apt:
+        name:
+          - python3-boto3
+          - python3-botocore
+        state: present
+        
+    - name: Install Trivy
+      ansible.builtin.shell: |
+        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+        
+    - name: Install Semgrep via pipx
+      ansible.builtin.shell: |
+        pipx install semgrep
+        
+    - name: Install Checkov via pipx
+      ansible.builtin.shell: |
+        pipx install checkov
+        
+    - name: Install tfsec
+      ansible.builtin.shell: |
+        curl -s https://raw.githubusercontent.com/aquasecurity/tfsec/master/scripts/install_linux.sh | bash
+        
+    - name: Verify installations
+      ansible.builtin.shell: |
+        echo "Trivy: $(trivy --version)"
+        echo "Semgrep: $(semgrep --version)"
+        echo "Checkov: $(checkov --version)"
+        echo "tfsec: $(tfsec --version)"

@@ -1,0 +1,23 @@
+---
+- name: Automated Incident Response
+  hosts: localhost
+  tasks:
+    - name: Collect CloudTrail logs
+      amazon.aws.aws_s3_object:
+        bucket: "{{ cloudtrail_bucket }}"
+        object: "{{ incident_date }}/{{ aws_account_id }}_CloudTrail_{{ aws_region }}_{{ incident_date }}.json.gz"
+        dest: ./evidence/cloudtrail.json.gz
+        mode: get
+      when: cloudtrail_bucket is defined
+      
+    - name: Isolate compromised instance
+      amazon.aws.ec2_instance:
+        instance_ids: "{{ compromised_instance_id }}"
+        state: stopped
+      when: compromised_instance_id is defined
+      
+    - name: Create forensic snapshot
+      amazon.aws.ec2_snapshot:
+        instance_id: "{{ compromised_instance_id }}"
+        description: "Forensic snapshot - {{ incident_id }}"
+      when: compromised_instance_id is defined

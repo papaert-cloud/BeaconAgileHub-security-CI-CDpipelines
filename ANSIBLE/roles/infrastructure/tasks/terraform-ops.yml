@@ -1,0 +1,14 @@
+---
+- name: Terraform init
+  community.general.terraform:
+    project_path: "{{ terraform_project_path | default('.') }}"
+    state: present
+    force_init: true
+  register: terraform_init
+
+- name: Terraform plan
+  community.general.terraform:
+    project_path: "{{ terraform_project_path | default('.') }}"
+    state: planned
+    plan_file: "{{ artifacts_path | default('./artifacts') }}/tfplan"
+  register: terraform_plan

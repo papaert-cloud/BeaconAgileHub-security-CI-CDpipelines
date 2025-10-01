@@ -1,0 +1,6 @@
+---
+- name: Run Semgrep SAST scan
+  ansible.builtin.shell: |
+    docker run --rm -v "$(pwd):/src" returntocorp/semgrep --config=auto --json --output={{ artifacts_path | default('./artifacts') }}/semgrep.json /src
+  register: semgrep_scan
+  ignore_errors: true

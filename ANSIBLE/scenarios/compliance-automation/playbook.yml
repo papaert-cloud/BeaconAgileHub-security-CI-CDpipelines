@@ -1,0 +1,24 @@
+---
+- name: Compliance Automation
+  hosts: localhost
+  tasks:
+    - name: CIS Benchmark validation
+      ansible.builtin.shell: |
+        aws configservice get-compliance-details-by-config-rule \
+          --config-rule-name {{ cis_rule_name }} > cis-compliance.json
+      when: cis_rule_name is defined
+      
+    - name: SOC 2 evidence collection
+      amazon.aws.aws_config_rule_info:
+        rule_names: 
+          - encrypted-volumes
+          - root-access-key-check
+          - mfa-enabled-for-iam-console-access
+      register: soc2_evidence
+      
+    - name: Generate compliance report
+      ansible.builtin.template:
+        src: compliance-report.html.j2
+        dest: compliance-report-{{ ansible_date_time.date }}.html
+      vars:
+        compliance_status: "{{ soc2_evidence }}"

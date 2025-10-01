@@ -1,0 +1,23 @@
+---
+- name: Cloud Security Monitoring
+  hosts: localhost
+  tasks:
+    - name: Query GuardDuty findings
+      amazon.aws.aws_guardduty_finding_info:
+        detector_id: "{{ guardduty_detector_id }}"
+      register: guardduty_findings
+      when: guardduty_detector_id is defined
+      
+    - name: Analyze VPC Flow Logs
+      ansible.builtin.shell: |
+        aws logs filter-log-events --log-group-name {{ vpc_flow_log_group }} \
+          --start-time {{ start_time }} --end-time {{ end_time }} \
+          --filter-pattern "REJECT" > rejected-connections.json
+      when: vpc_flow_log_group is defined
+      
+    - name: Create security dashboard
+      ansible.builtin.template:
+        src: security-dashboard.json.j2
+        dest: security-dashboard.json
+      vars:
+        findings_count: "{{ guardduty_findings.findings | length }}"

@@ -1,0 +1,22 @@
+---
+- name: AWS Security Architecture
+  hosts: localhost
+  gather_facts: false
+  
+  tasks:
+    - name: Enable GuardDuty
+      amazon.aws.aws_guardduty_detector:
+        state: present
+        enable: true
+        
+    - name: Configure Security Hub
+      amazon.aws.aws_securityhub_hub:
+        state: present
+        
+    - name: Create CloudTrail
+      amazon.aws.aws_cloudtrail:
+        state: present
+        name: security-audit-trail
+        s3_bucket_name: "{{ cloudtrail_bucket }}"
+        include_global_service_events: true
+      when: cloudtrail_bucket is defined

@@ -1,0 +1,55 @@
+---
+name: Ansible SBOM Demo
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: "005965605891"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  ansible-sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: >
+            arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsOIDCRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install Ansible
+        run: |
+          sudo apt update
+          sudo apt install -y ansible
+
+      - name: Install Ansible collections
+        run: |
+          cd ANSIBLE
+          ansible-galaxy collection install -r requirements.yml
+
+      - name: Create output directory
+        run: mkdir -p output
+
+      - name: Execute Ansible SBOM Generation
+        run: |
+          cd ANSIBLE
+          ansible-playbook -i inventories/dev/hosts \
+                           playbooks/security-gates.yml \
+                           --tags "container-security" \
+                           --extra-vars "github_run_id=${{ github.run_id }}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ansible-sbom-results
+          path: ANSIBLE/artifacts/

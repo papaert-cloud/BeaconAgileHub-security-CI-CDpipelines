@@ -1,0 +1,19 @@
+---
+- name: Supply Chain Security (SLSA)
+  hosts: localhost
+  gather_facts: false
+  
+  tasks:
+    - name: Generate provenance attestation
+      ansible.builtin.shell: |
+        cosign attest --predicate=provenance.json --type=slsaprovenance {{ artifact_name | default('app:latest') }}
+      when: cosign_enabled | default(false)
+      
+    - name: Verify signatures
+      ansible.builtin.shell: |
+        cosign verify {{ artifact_name | default('app:latest') }}
+      when: cosign_enabled | default(false)
+      
+    - name: Check dependencies
+      ansible.builtin.shell: |
+        osv-scanner --format=json . > dependency-scan.json

@@ -1,0 +1,18 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "lambda:CreateFunction",
+        "lambda:UpdateFunctionCode",
+        "lambda:InvokeFunction",
+        "iam:CreateRole",
+        "iam:AttachRolePolicy",
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

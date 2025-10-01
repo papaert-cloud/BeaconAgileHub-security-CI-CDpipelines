@@ -1,0 +1,49 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  StackSet template that creates an auto-remediation Lambda and an execution role. The Lambda code is expected to be deployed to S3 and the S3 key/bucket provided via StackSet parameters or embedded before deployment.
+
+Parameters:
+  LambdaS3Bucket:
+    Type: String
+  LambdaS3Key:
+    Type: String
+  LambdaHandler:
+    Type: String
+    Default: remediate.handler
+  LambdaRuntime:
+    Type: String
+    Default: python3.9
+
+Resources:
+  RemediationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "RemediationRole-${AWS::AccountId}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        # Add additional policies for remediation actions below
+
+  RemediationFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "remediate-${AWS::AccountId}"
+      Handler: !Ref LambdaHandler
+      Runtime: !Ref LambdaRuntime
+      Role: !GetAtt RemediationRole.Arn
+      Code:
+        S3Bucket: !Ref LambdaS3Bucket
+        S3Key: !Ref LambdaS3Key
+      Timeout: 30
+
+Outputs:
+  RemediationFunctionArn:
+    Value: !GetAtt RemediationFunction.Arn
+    Export:
+      Name: !Sub "RemediationFunctionArn-${AWS::AccountId}"

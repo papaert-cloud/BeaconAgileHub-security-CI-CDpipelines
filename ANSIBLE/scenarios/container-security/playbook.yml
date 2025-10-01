@@ -1,0 +1,23 @@
+---
+- name: Container Security & K8s RBAC
+  hosts: localhost
+  gather_facts: false
+  
+  tasks:
+    - name: Scan container image
+      ansible.builtin.shell: |
+        trivy image {{ container_image | default('nginx:latest') }} --format json > scan-results.json
+        
+    - name: Apply K8s RBAC policies
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: Role
+          metadata:
+            name: pod-reader
+            namespace: default
+          rules:
+          - apiGroups: [""]
+            resources: ["pods"]
+            verbs: ["get", "list"]
+      when: kubernetes_enabled | default(false)
